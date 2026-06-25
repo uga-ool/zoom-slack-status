@@ -110,7 +110,7 @@ class StatusSynchronizerTest(unittest.TestCase):
 
     def test_defers_when_outlook_status_present_at_meeting_start(self):
         with tempfile.TemporaryDirectory() as tmp:
-            outlook_status = SlackStatus("In a meeting", ":calendar:", 0)
+            outlook_status = SlackStatus("In a meeting • Outlook Calendar", ":spiral_calendar_pad:", 0)
             slack = FakeSlack(outlook_status)
             store = StateStore(Path(tmp) / "state.json")
             sync = StatusSynchronizer(
@@ -129,7 +129,7 @@ class StatusSynchronizerTest(unittest.TestCase):
 
     def test_clears_deferred_outlook_state_when_zoom_idle(self):
         with tempfile.TemporaryDirectory() as tmp:
-            outlook_status = SlackStatus("In a meeting", ":calendar:", 0)
+            outlook_status = SlackStatus("In a meeting • Outlook Calendar", ":spiral_calendar_pad:", 0)
             slack = FakeSlack(outlook_status)
             store = StateStore(Path(tmp) / "state.json")
             sync = StatusSynchronizer(
@@ -155,7 +155,7 @@ class StatusSynchronizerTest(unittest.TestCase):
             )
 
             sync.handle_zoom_state(True, now=100)
-            outlook_status = SlackStatus("In a meeting", ":calendar:", 0)
+            outlook_status = SlackStatus("In a meeting • Outlook Calendar", ":spiral_calendar_pad:", 0)
             slack.status = outlook_status
 
             sync.handle_zoom_state(False, now=120)
@@ -163,7 +163,7 @@ class StatusSynchronizerTest(unittest.TestCase):
 
     def test_sets_zoom_status_when_outlook_precedence_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:
-            outlook_status = SlackStatus("In a meeting", ":calendar:", 0)
+            outlook_status = SlackStatus("In a meeting • Outlook Calendar", ":spiral_calendar_pad:", 0)
             slack = FakeSlack(outlook_status)
             sync = StatusSynchronizer(
                 make_config(Path(tmp) / "state.json", ttl_minutes=0, outlook_precedence=False),

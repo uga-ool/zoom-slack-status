@@ -25,7 +25,7 @@ If you use [Outlook Calendar for Slack](https://slack.com/help/articles/36002013
 
 When Outlook Calendar has already set your Slack status to one of its default labels (`In a meeting`, `Working remotely`, or `Out of office`), this watcher will not overwrite it when you join a Zoom call. If your Zoom status was already set and Outlook updates your status during the call, the watcher stops managing Zoom status and leaves Outlook's label in place. When Zoom goes idle, the watcher clears its internal state without changing Slack.
 
-This detection is based on Slack status text labels, not on reading Outlook directly. Outlook Calendar will not override a status you set yourself, so if this watcher sets `On a Zoom call` first, Outlook cannot take over until the watcher yields (for example, when refresh detects a different status).
+This detection is based on Slack status text labels, not on reading Outlook directly. Slack's Outlook Calendar app often appends `• Outlook Calendar` to the status text (for example, `In a meeting • Outlook Calendar`); this watcher treats those as Outlook-owned. Outlook Calendar will not override a status you set yourself, so if this watcher sets `On a Zoom call` first, Outlook cannot take over until the watcher yields (for example, when refresh detects a different status).
 
 Disable precedence with `ZOOM_SLACK_OUTLOOK_PRECEDENCE=false`, or customize the Outlook labels with `ZOOM_SLACK_OUTLOOK_STATUS_TEXTS`.
 
