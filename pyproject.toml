@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zoom-slack-status"
+version = "0.1.0"
+description = "Set Slack status automatically while on Zoom calls."
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+zoom-slack-status = "zoom_slack_status.__main__:main"
+
