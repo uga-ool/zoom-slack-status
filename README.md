@@ -41,9 +41,23 @@ Slack's `users.profile.set` method requires a user token for status updates. Sla
 
 Do not generate an app-level token from **Basic Information**. App-level tokens start with `xapp-` and Slack only allows them to access specific app-wide APIs. This watcher needs a user OAuth token, which starts with `xoxp-`.
 
-## Slack OAuth Setup For Teams
+## Setup
 
-For a team rollout, regular Slack members should not need access to Slack developer settings and should not share tokens. Configure the Slack app once, then each teammate authorizes their own user token locally.
+**Setup guide (with screenshots):**
+
+- [HTML guide](docs/setup-guide/index.html) — open in your browser (double-click the file after cloning, or use **File → Open** in Chrome/Safari)
+- [Word document](docs/Zoom-Slack-Status-Setup-Guide.docx) — printable guide with the same steps
+
+Each person creates **their own** Slack app and connects it on **their own** Mac. You do not share apps, Client IDs, or `.env` files with anyone else.
+
+You will:
+
+1. Create a personal Slack app and copy your **Client ID**
+2. Download this project into **Documents**
+3. Connect Slack with a one-time browser sign-in
+4. Install the background watcher
+
+Open **Terminal** (Applications → Utilities → Terminal). After you download the project, stay in `~/Documents/zoom-slack-status` for the Terminal steps. If Terminal says a file is missing, run `cd ~/Documents/zoom-slack-status` and try again.
 
 Slack docs:
 
@@ -51,82 +65,150 @@ Slack docs:
 - Installing with OAuth: [https://docs.slack.dev/authentication/installing-with-oauth/](https://docs.slack.dev/authentication/installing-with-oauth/)
 - Using PKCE: [https://docs.slack.dev/authentication/using-pkce/](https://docs.slack.dev/authentication/using-pkce/)
 
-### One-Time Slack App Setup
+### Step 1: Create your Slack app
 
-Do this once as the Slack app owner or admin. Create or open the shared Slack app (for example, **Zoom Status Sync**) at [https://api.slack.com/apps](https://api.slack.com/apps).
+Do this once per person. Use a desktop web browser (Chrome or Safari is fine).
 
-1. Open **OAuth & Permissions**.
-2. Under **Redirect URLs**, add:
+1. Open [https://api.slack.com/apps](https://api.slack.com/apps) and sign in with your Slack account.
+2. Click **Create New App**.
+3. Choose **From scratch**.
+4. Enter an app name you will recognize later, for example **Zoom Status Sync – Todd**.
+5. Choose the Slack **workspace** where you want status updates (usually your work workspace).
+6. Click **Create App**.
+
+#### Redirect URL
+
+7. In the left sidebar, click **OAuth & Permissions**.
+8. Scroll to **Redirect URLs**.
+9. Click **Add New Redirect URL**.
+10. Paste this exactly:
 
 ```text
 http://localhost:8765/slack/oauth/callback
 ```
 
-3. In **OAuth & Permissions**, enable **PKCE**. This lets desktop/local installs use OAuth without sharing a client secret.
-4. Under **User Token Scopes**, add:
-   - `users.profile:read`
-   - `users.profile:write`
-5. On **OAuth & Permissions**, opt in to **Advanced token security via token rotation**. Slack recommends this for security-minded teams. See [token rotation](https://docs.slack.dev/authentication/using-token-rotation) in Slack's docs.
-6. Copy the app's **Client ID** from **Basic Information**. Share only this Client ID with teammates, not a client secret.
+11. Click **Add**, then click **Save URLs**.
 
-If your workspace requires app approval, a Workspace Owner or app manager may need to approve this app before regular members can authorize it.
+#### PKCE
 
-### Token Rotation
+12. On the same **OAuth & Permissions** page, find **PKCE** and turn it **on**. This app runs on your Mac and does not use a client secret.
 
-When token rotation is enabled, Slack issues short-lived user tokens. This helper stores the access token in `.env` but does not automatically refresh it yet.
+#### Scopes
 
-If status updates stop working, rerun OAuth login and reinstall the LaunchAgent:
+13. Still on **OAuth & Permissions**, scroll to **Scopes**.
+14. Under **User Token Scopes**, click **Add an OAuth Scope** and add:
+    - `users.profile:read`
+    - `users.profile:write`
+
+Do not add Bot Token Scopes. This watcher only updates **your** profile status.
+
+#### Token rotation (recommended)
+
+15. On **OAuth & Permissions**, find **Advanced token security via token rotation**.
+16. Click **Opt In**. Slack recommends this for security. See [token rotation](https://docs.slack.dev/authentication/using-token-rotation) in Slack's docs.
+
+#### Copy your Client ID
+
+17. In the left sidebar, click **Basic Information**.
+18. Scroll to **App Credentials**.
+19. Find **Client ID**. Click **Copy** (or select and copy the value). It looks like `1234567890.1234567890`.
+20. Keep this somewhere handy for the next step — you will paste it into your `.env` file. **Do not share your Client ID or `.env` file with others.**
+
+### Step 2: Download the project
+
+In Terminal, run:
 
 ```sh
-/usr/bin/python3 -m zoom_slack_status oauth login --env-file .env
-/usr/bin/python3 -m zoom_slack_status launch-agent install --env-file .env
+cd ~/Documents
+git clone https://github.com/uga-ool/zoom-slack-status.git
+cd zoom-slack-status
 ```
 
-OAuth login writes `SLACK_TOKEN_EXPIRES_AT` when Slack returns an expiration. If you see a warning about a rotating token during login, complete the steps above before the token expires.
+Your project folder is `~/Documents/zoom-slack-status` (Finder: **Documents → zoom-slack-status**).
 
-### Teammate Setup
+If `git` is not installed, install Xcode Command Line Tools when macOS prompts you, then run the commands again.
 
-Each teammate should run this on their own Mac:
+### Step 3: Create and edit your `.env` file
+
+1. Create your personal config file:
 
 ```sh
 cp .env.example .env
 ```
 
-Edit `.env` and set the shared Slack app Client ID:
+2. Files whose names start with `.` (like `.env`) are hidden in Finder by default. To see them in **Documents → zoom-slack-status**, press **⌘ Command + Shift + .** (period). Press **⌘ Command + Shift + .** again when you want to hide them.
+
+3. Open `.env` in TextEdit:
+
+```sh
+open -e .env
+```
+
+4. Find the line `SLACK_CLIENT_ID=` and paste **your** Client ID from Step 1 after the `=`:
 
 ```sh
 SLACK_CLIENT_ID=1234567890.1234567890
 SLACK_REDIRECT_URI=http://localhost:8765/slack/oauth/callback
 ```
 
-Then connect Slack:
+Replace `1234567890.1234567890` with the value you copied from **Basic Information → App Credentials**. Leave `SLACK_REDIRECT_URI` as shown.
+
+5. Save the file in TextEdit (**⌘ Command + S**) and close it.
+
+Do not share `.env`. After setup it will also contain your personal Slack token.
+
+### Step 4: Connect Slack
+
+Run this from `~/Documents/zoom-slack-status`:
 
 ```sh
 /usr/bin/python3 -m zoom_slack_status oauth login --env-file .env
 ```
 
-The command opens Slack in the browser, waits for the localhost callback, then writes that teammate's personal `SLACK_USER_TOKEN` into `.env`.
+What happens:
 
-Install the background watcher:
+1. Terminal prints a message and opens Slack in your browser.
+2. Slack asks you to allow the app to view and update your profile status. Click **Allow**.
+3. Your browser shows **Slack connected**. You can close that tab.
+4. Return to Terminal. It should say your token was saved to `.env`.
+
+If authorization fails, confirm your redirect URL, PKCE, and scopes from Step 1, then run the command again.
+
+### Step 5: Install the background watcher
+
+Still in `~/Documents/zoom-slack-status`:
 
 ```sh
 /usr/bin/python3 -m zoom_slack_status launch-agent install --env-file .env
 ```
 
-Do not share `.env` files. They contain personal Slack user tokens.
+This copies the helper to `~/Library/Application Support/zoom-slack-status/` and starts it in the background. You do not need to keep Terminal open after this.
 
-### Manual Token Setup
+To update later, open Terminal, run `cd ~/Documents/zoom-slack-status`, then `git pull`, then run the install command again. It stops the old watcher and replaces the staged copy automatically — no separate uninstall needed.
 
-You can still use a manually copied user token instead of OAuth onboarding. It must be a user OAuth token starting with `xoxp-` and it must include:
+### Token rotation
 
-- `users.profile:read`
-- `users.profile:write`
+When token rotation is enabled, Slack issues short-lived user tokens. This helper stores the access token in `.env` but does not automatically refresh it yet.
 
-Do not generate an app-level token from **Basic Information**. App-level tokens start with `xapp-` and Slack only allows them to access specific app-wide APIs.
+If status updates stop working, rerun OAuth login and reinstall the LaunchAgent:
+
+```sh
+cd ~/Documents/zoom-slack-status
+/usr/bin/python3 -m zoom_slack_status oauth login --env-file .env
+/usr/bin/python3 -m zoom_slack_status launch-agent install --env-file .env
+```
+
+OAuth login writes `SLACK_TOKEN_EXPIRES_AT` when Slack returns an expiration. If you see a warning about a rotating token during login, complete the steps above before the token expires.
+
+### Manual token setup (optional)
+
+You can skip OAuth login if you already have a user token. It must start with `xoxp-` and include `users.profile:read` and `users.profile:write`. Paste it into `.env` as `SLACK_USER_TOKEN`.
+
+Do not use an app-level token from **Basic Information**. App-level tokens start with `xapp-` and cannot update your profile status.
 
 ## Try It
 
-Check what the watcher currently sees:
+From `~/Documents/zoom-slack-status`, check what the watcher currently sees:
 
 ```sh
 /usr/bin/python3 -m zoom_slack_status status --env-file .env
@@ -146,7 +228,9 @@ Run for real:
 
 ## Run In The Background
 
-Install a user LaunchAgent:
+If you completed **Setup** above, the watcher is already installed. Use this section to reinstall, stop, or inspect it.
+
+From `~/Documents/zoom-slack-status`, install a user LaunchAgent:
 
 ```sh
 /usr/bin/python3 -m zoom_slack_status launch-agent install --env-file .env
@@ -185,9 +269,9 @@ ZOOM_SLACK_STATUS_TEXT=On a Zoom call
 ZOOM_SLACK_STATUS_EMOJI=:video_camera:
 ZOOM_SLACK_STATUS_TTL_MINUTES=120
 ZOOM_SLACK_REFRESH_MINUTES=30
-ZOOM_SLACK_POLL_SECONDS=15
+ZOOM_SLACK_POLL_SECONDS=5
 ZOOM_SLACK_BUSY_CONFIRMATIONS=1
-ZOOM_SLACK_IDLE_CONFIRMATIONS=2
+ZOOM_SLACK_IDLE_CONFIRMATIONS=1
 ZOOM_SLACK_OUTLOOK_PRECEDENCE=true
 ZOOM_SLACK_OUTLOOK_STATUS_TEXTS=In a meeting,Working remotely,Out of office
 ZOOM_SLACK_STATE_FILE=~/Library/Application Support/zoom-slack-status/state.json
@@ -198,6 +282,22 @@ ZOOM_SLACK_STATE_FILE=~/Library/Application Support/zoom-slack-status/state.json
 `ZOOM_SLACK_OUTLOOK_PRECEDENCE` defaults to `true`. Set it to `false` if you want Zoom status to overwrite Outlook Calendar statuses.
 
 `ZOOM_SLACK_OUTLOOK_STATUS_TEXTS` is a comma-separated list of Slack status labels to treat as Outlook Calendar-owned. Matching is case-insensitive.
+
+### Responsiveness
+
+Status updates are not instant. The watcher polls Zoom on a timer, then updates Slack.
+
+| Setting                         | Default | Effect                                          |
+| ------------------------------- | ------- | ----------------------------------------------- |
+| `ZOOM_SLACK_POLL_SECONDS`       | `5`     | How often Zoom is checked                       |
+| `ZOOM_SLACK_BUSY_CONFIRMATIONS` | `1`     | Polls required before setting status on join    |
+| `ZOOM_SLACK_IDLE_CONFIRMATIONS` | `1`     | Polls required before restoring status on leave |
+
+With defaults, expect status to appear within about **0–5 seconds** of joining and clear within about **0–5 seconds** of leaving. Worst-case delay is roughly `poll_seconds × confirmations`.
+
+Earlier defaults used a 15-second poll and two idle confirmations, which could take up to ~15 seconds to set status and ~30 seconds to clear. If status flickers when leaving calls, try `ZOOM_SLACK_IDLE_CONFIRMATIONS=2` (about 10 seconds to clear with a 5-second poll).
+
+After changing `.env`, rerun `launch-agent install` so the background helper picks up the new values.
 
 ## macOS Permissions
 

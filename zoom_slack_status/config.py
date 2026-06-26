@@ -65,9 +65,9 @@ def config_from_env(*, dry_run: bool = False, interval: Optional[int] = None) ->
         status_emoji=os.environ.get("ZOOM_SLACK_STATUS_EMOJI", ":video_camera:").strip(),
         status_ttl_minutes=_env_int("ZOOM_SLACK_STATUS_TTL_MINUTES", 120),
         refresh_minutes=_env_int("ZOOM_SLACK_REFRESH_MINUTES", 30),
-        poll_seconds=interval or _env_int("ZOOM_SLACK_POLL_SECONDS", 15),
+        poll_seconds=interval or _env_int("ZOOM_SLACK_POLL_SECONDS", 5),
         busy_confirmations=max(1, _env_int("ZOOM_SLACK_BUSY_CONFIRMATIONS", 1)),
-        idle_confirmations=max(1, _env_int("ZOOM_SLACK_IDLE_CONFIRMATIONS", 2)),
+        idle_confirmations=max(1, _env_int("ZOOM_SLACK_IDLE_CONFIRMATIONS", 1)),
         state_file=Path(
             os.environ.get("ZOOM_SLACK_STATE_FILE", DEFAULT_STATE_FILE)
         ).expanduser(),

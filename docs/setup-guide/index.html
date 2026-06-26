@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zoom → Slack Status Sync — Setup Guide</title>
+  <style>
+    :root {
+      --slack-purple: #4a154b;
+      --text: #1d1c1d;
+      --muted: #616061;
+      --border: #e0e0e0;
+      --code-bg: #f4f4f4;
+      --note-bg: #f8f4fb;
+      --warn-bg: #fdf2f2;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      line-height: 1.55;
+      background: #fafafa;
+    }
+
+    a { color: var(--slack-purple); }
+
+    .skip-link {
+      position: absolute;
+      left: -9999px;
+      top: auto;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+    }
+
+    .skip-link:focus {
+      position: static;
+      width: auto;
+      height: auto;
+      display: inline-block;
+      margin: 1rem;
+      padding: 0.5rem 1rem;
+      background: #fff;
+      border: 2px solid var(--slack-purple);
+    }
+
+    header {
+      background: #fff;
+      border-bottom: 4px solid var(--slack-purple);
+      padding: 2.5rem 1.5rem 2rem;
+      text-align: center;
+    }
+
+    header h1 {
+      margin: 0 0 0.35rem;
+      font-size: clamp(1.75rem, 4vw, 2.25rem);
+    }
+
+    header .subtitle {
+      margin: 0;
+      color: var(--slack-purple);
+      font-size: 1.35rem;
+      font-weight: 600;
+    }
+
+    header .tagline {
+      margin: 1rem auto 0;
+      max-width: 40rem;
+      color: var(--muted);
+    }
+
+    header .meta {
+      margin-top: 1rem;
+      color: #888;
+      font-size: 0.95rem;
+      font-style: italic;
+    }
+
+    main {
+      max-width: 52rem;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    nav.toc {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    nav.toc h2 {
+      margin: 0 0 0.75rem;
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--slack-purple);
+    }
+
+    nav.toc ol {
+      margin: 0;
+      padding-left: 1.25rem;
+    }
+
+    nav.toc li { margin: 0.35rem 0; }
+
+    section {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem 1.75rem;
+      margin-bottom: 1.5rem;
+    }
+
+    h2 {
+      margin: 0 0 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 3px solid var(--slack-purple);
+      font-size: 1.5rem;
+    }
+
+    h3 {
+      margin: 1.5rem 0 0.75rem;
+      color: var(--slack-purple);
+      font-size: 1.15rem;
+    }
+
+    p, ul, ol { margin: 0 0 0.85rem; }
+
+    ul, ol { padding-left: 1.4rem; }
+
+    li { margin: 0.35rem 0; }
+
+    pre, code {
+      font-family: "SF Mono", "Courier New", monospace;
+      font-size: 0.92rem;
+    }
+
+    pre {
+      margin: 0.75rem 0 1rem;
+      padding: 0.85rem 1rem;
+      background: var(--code-bg);
+      border: 1px solid #ccc;
+      border-left: 4px solid var(--slack-purple);
+      border-radius: 4px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .note, .warn {
+      margin: 1rem 0;
+      padding: 0.85rem 1rem;
+      border-radius: 6px;
+    }
+
+    .note {
+      background: var(--note-bg);
+      border-left: 4px solid #7b3d9e;
+    }
+
+    .warn {
+      background: var(--warn-bg);
+      border-left: 4px solid #c0392b;
+    }
+
+    figure {
+      margin: 1rem 0 1.25rem;
+      text-align: center;
+    }
+
+    figure img {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+
+    figure figcaption {
+      margin-top: 0.5rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    footer {
+      text-align: center;
+      color: #888;
+      font-size: 0.9rem;
+      font-style: italic;
+      padding: 0 1.5rem 2rem;
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+
+  <header>
+    <h1>Zoom → Slack Status Sync</h1>
+    <p class="subtitle">Setup Guide</p>
+    <p class="tagline">Automatically sets your Slack status when you join a Zoom call, then restores your previous status when the call ends.</p>
+    <p class="meta">Requirements: macOS · Python 3.9+ · about 15 minutes</p>
+  </header>
+
+  <main id="main-content">
+    <nav class="toc" aria-label="Table of contents">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#step-1">Create your Slack app</a></li>
+        <li><a href="#step-2">Download the project</a></li>
+        <li><a href="#step-3">Configure your .env file</a></li>
+        <li><a href="#step-4">Connect Slack</a></li>
+        <li><a href="#step-5">Install the background watcher</a></li>
+        <li><a href="#verify">Verify it is working</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+      </ol>
+    </nav>
+
+    <section id="overview">
+      <h2>Overview</h2>
+      <p>Each person runs their own copy of this tool. You will:</p>
+      <ul>
+        <li>Create your own personal Slack app (about 5 minutes)</li>
+        <li>Download the project to your Mac</li>
+        <li>Add your Client ID to a config file</li>
+        <li>Run a one-time Slack sign-in</li>
+        <li>Install the background watcher (starts automatically at login)</li>
+      </ul>
+      <div class="note"><strong>💡 Note:</strong> Each person must do this individually — do not share Client IDs or config files.</div>
+      <p>Also available as a Word document: <a href="../Zoom-Slack-Status-Setup-Guide.docx">Zoom-Slack-Status-Setup-Guide.docx</a></p>
+    </section>
+
+    <section id="step-1">
+      <h2>Step 1: Create Your Slack App</h2>
+      <p>Open a web browser and go to <a href="https://api.slack.com/apps">api.slack.com/apps</a>. You will see a list of your existing apps (it may be empty). Click <strong>Create New App</strong>.</p>
+      <figure>
+        <img src="screenshots/01_your_apps.png" alt="Slack API page showing Create New App button">
+        <figcaption>Click Create New App</figcaption>
+      </figure>
+
+      <h3>Choose &ldquo;From scratch&rdquo;</h3>
+      <p>In the modal that appears, select <strong>From scratch</strong>.</p>
+      <figure>
+        <img src="screenshots/02_from_scratch.png" alt="Create New App modal with From scratch selected">
+      </figure>
+
+      <h3>Name your app and choose a workspace</h3>
+      <p>Give your app a personal name so you can identify it later. Include your name to keep it distinct from teammates&rsquo; apps:</p>
+      <pre>Zoom Status Sync – Todd</pre>
+      <p>Select your work Slack workspace from the dropdown and click <strong>Create App</strong>.</p>
+      <figure>
+        <img src="screenshots/03_app_name.png" alt="App name and workspace selection form">
+      </figure>
+
+      <h3>Add a redirect URL</h3>
+      <p>In the left sidebar, click <strong>OAuth &amp; Permissions</strong>. Scroll to <strong>Redirect URLs</strong>, click <strong>Add New Redirect URL</strong>, and paste exactly:</p>
+      <pre>http://localhost:8765/slack/oauth/callback</pre>
+      <p>Click <strong>Add</strong>, then <strong>Save URLs</strong>.</p>
+      <figure>
+        <img src="screenshots/04_redirect_url.png" alt="OAuth redirect URL configuration">
+      </figure>
+
+      <h3>Enable PKCE</h3>
+      <p>Still on <strong>OAuth &amp; Permissions</strong>, find the <strong>PKCE</strong> section and turn it <strong>On</strong>. This app runs on your Mac and has no client secret, so PKCE is required.</p>
+      <figure>
+        <img src="screenshots/05_pkce.png" alt="PKCE enabled on OAuth and Permissions page">
+      </figure>
+
+      <h3>Add user token scopes</h3>
+      <p>Scroll down to <strong>Scopes</strong>. Under <strong>User Token Scopes</strong> (not Bot Token Scopes), add both:</p>
+      <ul>
+        <li><code>users.profile:read</code></li>
+        <li><code>users.profile:write</code></li>
+      </ul>
+      <div class="warn"><strong>⚠️ Do NOT add Bot Token Scopes</strong> — only User Token Scopes are needed.</div>
+      <figure>
+        <img src="screenshots/06_scopes.png" alt="User token scopes users.profile:read and users.profile:write">
+      </figure>
+
+      <h3>Opt in to token rotation (recommended)</h3>
+      <p>On <strong>OAuth &amp; Permissions</strong>, find <strong>Advanced token security via token rotation</strong> and click <strong>Opt In</strong>.</p>
+
+      <h3>Copy your Client ID</h3>
+      <p>In the left sidebar, click <strong>Basic Information</strong>. Scroll to <strong>App Credentials</strong> and find your <strong>Client ID</strong>. Click <strong>Copy</strong> — you will need it in Step 3.</p>
+      <figure>
+        <img src="screenshots/07_client_id.png" alt="Basic Information page showing Client ID">
+      </figure>
+      <div class="note"><strong>💡 Note:</strong> Your Client ID looks like <code>1234567890.1234567890</code>. Keep it handy.</div>
+    </section>
+
+    <section id="step-2">
+      <h2>Step 2: Download the Project</h2>
+      <p>Open <strong>Terminal</strong> (Applications → Utilities → Terminal) and run these commands:</p>
+      <pre>cd ~/Documents
+git clone https://github.com/uga-ool/zoom-slack-status.git
+cd zoom-slack-status</pre>
+      <figure>
+        <img src="screenshots/08_git_clone.png" alt="Terminal showing git clone commands">
+      </figure>
+      <p>If macOS asks you to install Xcode Command Line Tools, click <strong>Install</strong> and then re-run the commands.</p>
+      <div class="note"><strong>💡 Note:</strong> Your project folder will be at <code>~/Documents/zoom-slack-status</code> (Finder: Documents → zoom-slack-status).</div>
+    </section>
+
+    <section id="step-3">
+      <h2>Step 3: Configure Your .env File</h2>
+      <p>Still in Terminal (in <code>~/Documents/zoom-slack-status</code>), run:</p>
+      <pre>cp .env.example .env
+open -e .env</pre>
+      <p>Files whose names start with <code>.</code> (like <code>.env</code>) are hidden in Finder by default. Press <strong>⌘ Command + Shift + .</strong> in Finder to show or hide them.</p>
+      <p>TextEdit opens your config file. Find the <code>SLACK_CLIENT_ID=</code> line and paste your Client ID from Step 1 after the equals sign:</p>
+      <figure>
+        <img src="screenshots/09_env_file.png" alt="TextEdit showing .env file with SLACK_CLIENT_ID">
+      </figure>
+      <p>Save the file (<strong>⌘ Command + S</strong>) and close TextEdit.</p>
+      <div class="warn"><strong>⚠️ Never share your .env file.</strong> It will contain your personal Slack token after Step 4.</div>
+    </section>
+
+    <section id="step-4">
+      <h2>Step 4: Connect Slack</h2>
+      <p>Back in Terminal, run:</p>
+      <pre>/usr/bin/python3 -m zoom_slack_status oauth login --env-file .env</pre>
+      <p>Terminal opens Slack in your browser. Click <strong>Allow</strong>, then return to Terminal — you should see a success message.</p>
+      <figure>
+        <img src="screenshots/10_oauth_login.png" alt="Terminal showing oauth login command">
+      </figure>
+      <p>If it fails, double-check your redirect URL, PKCE setting, and scopes from Step 1, then run the command again.</p>
+    </section>
+
+    <section id="step-5">
+      <h2>Step 5: Install the Background Watcher</h2>
+      <p>Run this final command from <code>~/Documents/zoom-slack-status</code>:</p>
+      <pre>/usr/bin/python3 -m zoom_slack_status launch-agent install --env-file .env</pre>
+      <figure>
+        <img src="screenshots/11_launch_agent.png" alt="Terminal showing launch-agent install command">
+      </figure>
+      <p>The watcher is now running in the background. You can close Terminal. It starts again automatically when you log in to your Mac.</p>
+      <div class="note"><strong>💡 Note:</strong> Join a Zoom call → your Slack status changes to &ldquo;On a Zoom call&rdquo; within about 5 seconds. Leave → your previous status is restored.</div>
+    </section>
+
+    <section id="verify">
+      <h2>Verify It&rsquo;s Working</h2>
+      <p>Join a Zoom test call and check your Slack status. To manually check what the watcher sees, run:</p>
+      <pre>/usr/bin/python3 -m zoom_slack_status status --env-file .env</pre>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>Troubleshooting</h2>
+
+      <h3>Status stopped updating after a few weeks</h3>
+      <p>Token rotation may have expired your token. Re-run Steps 4 and 5:</p>
+      <pre>cd ~/Documents/zoom-slack-status
+/usr/bin/python3 -m zoom_slack_status oauth login --env-file .env
+/usr/bin/python3 -m zoom_slack_status launch-agent install --env-file .env</pre>
+
+      <h3>Status takes too long to clear after leaving a call</h3>
+      <p>Add this line to your <code>.env</code> file and reinstall the agent:</p>
+      <pre>ZOOM_SLACK_IDLE_CONFIRMATIONS=2</pre>
+
+      <h3>View logs</h3>
+      <pre>~/Library/Logs/zoom-slack-status.log
+~/Library/Logs/zoom-slack-status.err.log</pre>
+
+      <h3>Uninstall</h3>
+      <pre>/usr/bin/python3 -m zoom_slack_status launch-agent uninstall</pre>
+    </section>
+  </main>
+
+  <footer>
+    Project: <a href="https://github.com/uga-ool/zoom-slack-status">github.com/uga-ool/zoom-slack-status</a>
+    · Each person sets up their own app and .env. Do not share credentials.
+  </footer>
+</body>
+</html>
