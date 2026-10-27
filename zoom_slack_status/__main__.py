@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import logging
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -11,7 +13,7 @@ from .config import Config, config_from_env, load_env_file, validate_config
 from .doctor import format_checks, run_checks
 from .launch_agent import APP_ENV_PATH, install as install_launch_agent
 from .launch_agent import plist_xml, uninstall as uninstall_launch_agent
-from .oauth import DEFAULT_REDIRECT_URI, TokenRefresher, build_authorize_url, code_challenge
+from .oauth import DEFAULT_REDIRECT_URI, EXAMPLE_CLIENT_ID, TokenRefresher, build_authorize_url, code_challenge
 from .oauth import exchange_code_for_token, generate_code_verifier, open_authorize_url
 from .oauth import save_oauth_env, wait_for_local_callback
 from .outlook import any_lunch_event, is_outlook_calendar_status
@@ -37,6 +39,21 @@ def main(argv: list[str] | None = None) -> int:
         parser.exit(2, f"error: {exc}\n")
     except SlackApiError as exc:
         parser.exit(1, f"slack error: {exc}\n")
+    except TimeoutError:
+        parser.exit(1, "error: Timed out waiting for Slack. Run oauth login again, then click Allow in the browser.\n")
+    except FileNotFoundError as exc:
+        parser.exit(2, f"error: {exc}\n")
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or "").strip() or str(exc)
+        parser.exit(1, f"error: macOS could not start the background watcher ({detail}). Run launch-agent install again.\n")
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        parser.exit(
+            1,
+            "error: Port 8765 is already in use, probably by another Slack sign-in that is still waiting. "
+            "Close it or wait a few minutes, then try again.\n",
+        )
     except KeyboardInterrupt:
         print("Stopped.")
         return 130
@@ -184,6 +201,11 @@ def command_oauth_login(args: argparse.Namespace) -> int:
     client_id = (args.client_id or os.environ.get("SLACK_CLIENT_ID") or "").strip()
     if not client_id:
         raise ValueError("SLACK_CLIENT_ID is required. Add it to .env or pass --client-id.")
+    if client_id == EXAMPLE_CLIENT_ID:
+        raise ValueError(
+            "SLACK_CLIENT_ID is still the example value. Copy your app's Client ID from "
+            "Basic Information > App Credentials on api.slack.com and pass it with --client-id."
+        )
 
     redirect_uri = (
         args.redirect_uri or os.environ.get("SLACK_REDIRECT_URI") or DEFAULT_REDIRECT_URI

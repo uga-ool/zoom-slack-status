@@ -1,4 +1,5 @@
 import contextlib
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -110,6 +111,23 @@ class InstallTest(unittest.TestCase):
             launch_agent.install(REPO_ROOT, source_env)
 
             self.assertEqual(read_env_file(launch_agent.APP_ENV_PATH)["SLACK_REFRESH_TOKEN"], "xoxe-1-source")
+
+    def test_install_retries_bootstrap_once(self):
+        with isolated_install_paths() as (root, launchctl):
+            source_env = self.write_source_env(root, expires_at=100)
+            failures = [subprocess.CalledProcessError(5, "launchctl", stderr="Bootstrap failed: 5")]
+
+            def flaky(args, *, check):
+                if args[0] == "bootstrap" and failures:
+                    raise failures.pop()
+                return subprocess.CompletedProcess(args, 0, "", "")
+
+            launchctl.side_effect = flaky
+            with mock.patch.object(launch_agent.time, "sleep"):
+                launch_agent.install(REPO_ROOT, source_env)
+
+            bootstraps = [call for call in launchctl.call_args_list if call.args[0][0] == "bootstrap"]
+            self.assertEqual(len(bootstraps), 2)
 
     def test_install_and_uninstall_remove_legacy_agent(self):
         with isolated_install_paths() as (root, _launchctl):

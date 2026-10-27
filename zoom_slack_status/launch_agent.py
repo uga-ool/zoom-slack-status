@@ -5,6 +5,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -63,7 +64,12 @@ def install(repo_dir: Path, env_file: Path) -> Path:
         plistlib.dumps(build_plist(runtime_dir, installed_env_file), sort_keys=False)
     )
     _launchctl(["bootout", _gui_target(), str(PLIST_PATH)], check=False)
-    _launchctl(["bootstrap", _gui_target(), str(PLIST_PATH)], check=True)
+    try:
+        _launchctl(["bootstrap", _gui_target(), str(PLIST_PATH)], check=True)
+    except subprocess.CalledProcessError:
+        # launchd can report "Bootstrap failed: 5" right after a bootout; one retry is enough.
+        time.sleep(1)
+        _launchctl(["bootstrap", _gui_target(), str(PLIST_PATH)], check=True)
     _launchctl(["enable", f"{_gui_target()}/{LABEL}"], check=False)
     return PLIST_PATH
 

@@ -37,10 +37,12 @@ class FakeDetector:
         return ZoomMeetingState(False, "process", "Zoom is not running")
 
 
-def fake_run(*, accessibility_ok=True, agent_stdout="state = running"):
+def fake_run(*, accessibility_ok=True, agent_stdout="state = running", outlook_running=True):
     def run(args, **_kwargs):
         if args[0] == "/usr/bin/osascript":
             return subprocess.CompletedProcess(args, 0 if accessibility_ok else 1, "3", "")
+        if args[0] == "/usr/bin/pgrep":
+            return subprocess.CompletedProcess(args, 0 if outlook_running else 1, "", "")
         return subprocess.CompletedProcess(args, 0, agent_stdout, "")
 
     return run
@@ -114,6 +116,21 @@ class DoctorTest(unittest.TestCase):
         self.assertFalse(check.ok)
         self.assertFalse(check.required)
         self.assertIn("Outlook is not running", check.detail)
+
+    def test_closed_outlook_is_not_reported_as_readable(self):
+        check = self.checks(outlook_running=False)["Outlook calendar for Lunch (optional)"]
+
+        self.assertFalse(check.ok)
+        self.assertIn("Microsoft Outlook is not running", check.detail)
+
+    def test_fix_lines_are_runnable_commands(self):
+        checks = self.checks(slack=FakeSlack(error=SlackApiError("invalid_auth")), agent_stdout="state = not running")
+
+        self.assertIn("/usr/bin/python3 -m zoom_slack_status oauth login --env-file .env", checks["Slack"].fix)
+        self.assertIn(
+            "/usr/bin/python3 -m zoom_slack_status launch-agent install --env-file .env",
+            checks["Background watcher"].fix,
+        )
 
     def test_outlook_check_skipped_when_lunch_disabled(self):
         checks = self.checks(config=make_config(self.root / "state.json", lunch_enabled=False))

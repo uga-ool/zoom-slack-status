@@ -22,6 +22,8 @@ from .slack import API_BASE, SlackApiError
 
 DEFAULT_REDIRECT_URI = "http://localhost:8765/slack/oauth/callback"
 DEFAULT_USER_SCOPES = ("users.profile:read", "users.profile:write")
+# The example value in .env.example; a real Client ID is never this.
+EXAMPLE_CLIENT_ID = "1234567890.1234567890"
 TOKEN_REFRESH_MARGIN_SECONDS = 600
 
 
