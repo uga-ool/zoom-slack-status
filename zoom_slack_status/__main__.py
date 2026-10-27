@@ -14,7 +14,8 @@ from .launch_agent import plist_xml, uninstall as uninstall_launch_agent
 from .oauth import DEFAULT_REDIRECT_URI, TokenRefresher, build_authorize_url, code_challenge
 from .oauth import exchange_code_for_token, generate_code_verifier, open_authorize_url
 from .oauth import save_oauth_env, wait_for_local_callback
-from .outlook import is_outlook_calendar_status
+from .outlook import any_lunch_event, is_outlook_calendar_status
+from .outlook_calendar import OutlookCalendarDetector
 from .slack import SlackApiError, SlackClient, SlackRateLimitError
 from .sync import StateStore, StatusSynchronizer
 from .zoom import ZoomDetector
@@ -122,6 +123,15 @@ def command_status(args: argparse.Namespace) -> int:
             print(f"Outlook Calendar precedence: {'active' if outlook_owned else 'not active'}")
     else:
         print("Slack: not checked because SLACK_USER_TOKEN is not set")
+
+    if config.lunch_enabled:
+        calendar_check = OutlookCalendarDetector(app_name=config.outlook_app_name, subject_filters=config.lunch_labels).current_event_titles()
+        if not calendar_check.checked:
+            print(f"Lunch detection: could not read Outlook calendar ({calendar_check.detail})")
+        else:
+            titles = ", ".join(calendar_check.event_titles) or "(no current events)"
+            lunch_active = any_lunch_event(calendar_check.event_titles, config)
+            print(f"Lunch detection: {'active' if lunch_active else 'not active'} (current events: {titles})")
     return 0
 
 
@@ -137,6 +147,7 @@ def command_daemon(args: argparse.Namespace) -> int:
     config = _config(args, interval=args.interval)
     validate_config(config)
     detector = ZoomDetector()
+    calendar_detector = OutlookCalendarDetector(app_name=config.outlook_app_name, subject_filters=config.lunch_labels)
     synchronizer = _synchronizer(config, args)
 
     if args.once:
@@ -148,9 +159,10 @@ def command_daemon(args: argparse.Namespace) -> int:
             zoom_state.detail,
         )
         synchronizer.handle_zoom_state(zoom_state.in_meeting)
+        _check_lunch(config, calendar_detector, synchronizer)
         return 0
 
-    run_daemon(config, detector, synchronizer)
+    run_daemon(config, detector, calendar_detector, synchronizer)
     return 0
 
 
@@ -237,7 +249,12 @@ def command_launch_agent(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_daemon(config: Config, detector: ZoomDetector, synchronizer: StatusSynchronizer) -> None:
+def run_daemon(
+    config: Config,
+    detector: ZoomDetector,
+    calendar_detector: OutlookCalendarDetector,
+    synchronizer: StatusSynchronizer,
+) -> None:
     logging.info("Starting Zoom to Slack watcher. Polling every %s seconds.", config.poll_seconds)
     stable_state: bool | None = None
     busy_count = 0
@@ -274,22 +291,42 @@ def run_daemon(config: Config, detector: ZoomDetector, synchronizer: StatusSynch
                 zoom_state.detail,
             )
 
-        if stable_state is not None:
-            try:
+        try:
+            if stable_state is not None:
                 synchronizer.handle_zoom_state(stable_state)
-            except SlackRateLimitError as exc:
-                sleep_for = exc.retry_after or config.poll_seconds
-                logging.warning("Slack rate limited the request; sleeping for %s seconds.", sleep_for)
-                time.sleep(sleep_for)
-            except SlackApiError as exc:
-                sleep_for = max(60, config.poll_seconds)
-                logging.error("Slack update failed: %s. Sleeping for %s seconds.", exc, sleep_for)
-                time.sleep(sleep_for)
+            _check_lunch(config, calendar_detector, synchronizer)
+        except SlackRateLimitError as exc:
+            sleep_for = exc.retry_after or config.poll_seconds
+            logging.warning("Slack rate limited the request; sleeping for %s seconds.", sleep_for)
+            time.sleep(sleep_for)
+        except SlackApiError as exc:
+            sleep_for = max(60, config.poll_seconds)
+            logging.error("Slack update failed: %s. Sleeping for %s seconds.", exc, sleep_for)
+            time.sleep(sleep_for)
 
         time.sleep(config.poll_seconds)
 
 
+def _check_lunch(
+    config: Config,
+    calendar_detector: OutlookCalendarDetector,
+    synchronizer: StatusSynchronizer,
+) -> None:
+    if not config.lunch_enabled:
+        return
+
+    calendar_check = calendar_detector.current_event_titles()
+    if not calendar_check.checked:
+        logging.debug("Could not read Outlook calendar: %s", calendar_check.detail)
+        return
+
+    lunch_active = any_lunch_event(calendar_check.event_titles, config)
+    synchronizer.handle_lunch_state(lunch_active)
+
+
 def _config(args: argparse.Namespace, *, interval: int | None = None) -> Config:
+    # Token refresh happens inside SlackClient, so only the copy of .env that owns the
+    # refresh token ever spends it. See _slack_client.
     return config_from_env(dry_run=args.dry_run, interval=interval)
 
 

@@ -11,7 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
@@ -179,13 +179,21 @@ def exchange_code_for_token(
 
 
 def refresh_access_token(*, client_id: str, refresh_token: str) -> OAuthToken:
-    # PKCE apps are public clients, so Slack refreshes without a client secret.
+    """Exchanges a rotating refresh token for a new access token.
+
+    See https://docs.slack.dev/authentication/using-token-rotation. PKCE apps are
+    public clients, so Slack refreshes without a client secret. If Slack omits a
+    new refresh token, the current one stays in use.
+    """
     payload = {
         "client_id": client_id,
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
     }
-    return _token_from_response(_oauth_request(payload))
+    token = _token_from_response(_oauth_request(payload))
+    if not token.refresh_token:
+        token = replace(token, refresh_token=refresh_token)
+    return token
 
 
 class TokenRefresher:
@@ -227,14 +235,10 @@ class TokenRefresher:
             ) from exc
 
         # Slack revokes the old refresh token shortly after use, so save the new one right away.
-        values = {"SLACK_USER_TOKEN": token.access_token}
+        save_refreshed_token(self.env_file, token)
         if token.refresh_token:
             self.refresh_token = token.refresh_token
-            values["SLACK_REFRESH_TOKEN"] = token.refresh_token
         self.expires_at = token.expires_at
-        if self.expires_at:
-            values["SLACK_TOKEN_EXPIRES_AT"] = str(self.expires_at)
-        update_env_file(self.env_file, values)
         self.logger.info("Refreshed Slack token; it now expires at %s.", self.expires_at or "(unknown)")
         return token.access_token
 
@@ -272,6 +276,17 @@ def save_oauth_env(
     if token.expires_in:
         values["SLACK_TOKEN_EXPIRES_AT"] = str(token.expires_at)
 
+    update_env_file(env_file, values)
+
+
+def save_refreshed_token(env_file: Path, token: OAuthToken) -> None:
+    values = {"SLACK_USER_TOKEN": token.access_token}
+    if token.token_type:
+        values["SLACK_TOKEN_TYPE"] = token.token_type
+    if token.refresh_token:
+        values["SLACK_REFRESH_TOKEN"] = token.refresh_token
+    if token.expires_in:
+        values["SLACK_TOKEN_EXPIRES_AT"] = str(token.expires_at)
     update_env_file(env_file, values)
 
 

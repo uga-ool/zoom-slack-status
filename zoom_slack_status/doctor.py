@@ -9,6 +9,7 @@ from typing import Callable, List, Optional
 
 from .config import Config
 from .launch_agent import LABEL, LEGACY_PLIST_PATH, PLIST_PATH, _gui_target
+from .outlook_calendar import OutlookCalendarDetector
 from .slack import SlackApiError, SlackClient
 from .zoom import ZoomDetector
 
@@ -35,18 +36,25 @@ def run_checks(
     *,
     slack: Optional[SlackClient],
     detector: Optional[ZoomDetector] = None,
+    calendar_detector: Optional[OutlookCalendarDetector] = None,
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
     now: Optional[float] = None,
 ) -> List[Check]:
     now = time.time() if now is None else now
-    return [
+    checks = [
         _check_python(),
         _check_env_file(env_file),
         _check_slack(config, slack, now),
         _check_zoom(detector or ZoomDetector()),
         _check_accessibility(run),
-        _check_launch_agent(run),
     ]
+    if config.lunch_enabled:
+        calendar_detector = calendar_detector or OutlookCalendarDetector(
+            app_name=config.outlook_app_name, subject_filters=config.lunch_labels
+        )
+        checks.append(_check_outlook_calendar(calendar_detector))
+    checks.append(_check_launch_agent(run))
+    return checks
 
 
 def format_checks(checks: List[Check]) -> str:
@@ -129,6 +137,21 @@ def _check_accessibility(run: Callable[..., subprocess.CompletedProcess]) -> Che
         False,
         "not granted; meeting detection relies on the Zoom process only",
         "Open System Settings > Privacy & Security > Accessibility and turn on the app running this check.",
+        required=False,
+    )
+
+
+def _check_outlook_calendar(calendar_detector: OutlookCalendarDetector) -> Check:
+    name = "Outlook calendar for Lunch (optional)"
+    calendar_check = calendar_detector.current_event_titles()
+    if calendar_check.checked:
+        titles = ", ".join(calendar_check.event_titles) or "no Lunch event right now"
+        return Check(name, True, f"readable ({titles})", required=False)
+    return Check(
+        name,
+        False,
+        f"could not read Outlook ({calendar_check.detail})",
+        "Open Outlook for Mac. If macOS asks to let this app control Outlook, click OK.",
         required=False,
     )
 

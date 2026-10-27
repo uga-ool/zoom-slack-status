@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest import mock
 
 from zoom_slack_status import __main__ as cli
+from zoom_slack_status.outlook_calendar import CalendarCheck
 from zoom_slack_status.slack import SlackApiError, SlackRateLimitError
 from zoom_slack_status.zoom import ZoomMeetingState
 
@@ -22,6 +23,13 @@ class FakeDetector:
     def detect(self):
         in_meeting = self.states.pop(0)
         return ZoomMeetingState(in_meeting, "test", "scripted")
+
+
+class UnreadableCalendar:
+    """Outlook is not running, so lunch detection stays out of these loop tests."""
+
+    def current_event_titles(self):
+        return CalendarCheck(False, (), "Outlook is not running")
 
 
 class RecordingSynchronizer:
@@ -51,7 +59,7 @@ def run_polls(config, states, synchronizer):
 
     with mock.patch.object(cli.time, "sleep", side_effect=sleep):
         try:
-            cli.run_daemon(config, FakeDetector(states), synchronizer)
+            cli.run_daemon(config, FakeDetector(states), UnreadableCalendar(), synchronizer)
         except StopLoop:
             pass
     return sleeps

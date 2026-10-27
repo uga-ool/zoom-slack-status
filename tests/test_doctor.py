@@ -6,6 +6,7 @@ from unittest import mock
 
 from zoom_slack_status import doctor
 from zoom_slack_status.doctor import Check, format_checks, run_checks
+from zoom_slack_status.outlook_calendar import CalendarCheck
 from zoom_slack_status.slack import SlackApiError, SlackStatus
 from zoom_slack_status.zoom import ZoomMeetingState
 
@@ -21,6 +22,14 @@ class FakeSlack:
         if self.error:
             raise self.error
         return self.status
+
+
+class FakeCalendar:
+    def __init__(self, calendar_check):
+        self.calendar_check = calendar_check
+
+    def current_event_titles(self):
+        return self.calendar_check
 
 
 class FakeDetector:
@@ -49,6 +58,7 @@ class DoctorTest(unittest.TestCase):
         patcher = mock.patch.multiple(doctor, PLIST_PATH=plist, LEGACY_PLIST_PATH=self.root / "legacy.plist")
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.calendar_check = CalendarCheck(True, ())
 
     def checks(self, *, config=None, slack=None, **run_kwargs):
         config = config or make_config(self.root / "state.json")
@@ -59,6 +69,7 @@ class DoctorTest(unittest.TestCase):
                 self.env_file,
                 slack=slack if slack is not None else FakeSlack(SlackStatus("Lunch", ":taco:", 0)),
                 detector=FakeDetector(),
+                calendar_detector=FakeCalendar(self.calendar_check),
                 run=fake_run(**run_kwargs),
                 now=0,
             )
@@ -94,6 +105,20 @@ class DoctorTest(unittest.TestCase):
         output = format_checks(list(checks.values()))
         self.assertIn("[--] Accessibility", output)
         self.assertIn("Everything looks good.", output)
+
+    def test_unreadable_outlook_is_optional(self):
+        self.calendar_check = CalendarCheck(False, (), "Outlook is not running")
+
+        check = self.checks()["Outlook calendar for Lunch (optional)"]
+
+        self.assertFalse(check.ok)
+        self.assertFalse(check.required)
+        self.assertIn("Outlook is not running", check.detail)
+
+    def test_outlook_check_skipped_when_lunch_disabled(self):
+        checks = self.checks(config=make_config(self.root / "state.json", lunch_enabled=False))
+
+        self.assertNotIn("Outlook calendar for Lunch (optional)", checks)
 
     def test_stopped_agent_is_a_problem(self):
         checks = self.checks(agent_stdout="state = not running")

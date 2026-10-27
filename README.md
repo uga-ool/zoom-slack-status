@@ -18,6 +18,7 @@ Slack docs:
 - Skips restore if you manually changed your Slack status during the call.
 - Yields to Slack's Outlook Calendar app when it has already set your status.
 - Uses a status expiration as a safety net, so the Zoom status will not stay forever if the watcher stops.
+- Recognizes a `Lunch` calendar event in Outlook for Mac and sets your Slack status to `:fork_and_knife: Lunch`, restoring your previous status when the event ends.
 
 ## Status Precedence
 
@@ -28,6 +29,30 @@ When Outlook Calendar has already set your Slack status to one of its default la
 This detection is based on Slack status text labels, not on reading Outlook directly. Slack's Outlook Calendar app often appends `• Outlook Calendar` to the status text (for example, `In a meeting • Outlook Calendar`); this watcher treats those as Outlook-owned. Outlook Calendar will not override a status you set yourself, so if this watcher sets `On a Zoom call` first, Outlook cannot take over until the watcher yields (for example, when refresh detects a different status).
 
 Disable precedence with `ZOOM_SLACK_OUTLOOK_PRECEDENCE=false`, or customize the Outlook labels with `ZOOM_SLACK_OUTLOOK_STATUS_TEXTS`.
+
+## Lunch Status
+
+This watcher can read your calendar directly from **Outlook for Mac** via AppleScript, and set your Slack status to `:fork_and_knife: Lunch` whenever a calendar event whose title matches one of your configured labels (default: `Lunch`) is happening right now. It stores your previous Slack status and restores it when the event ends.
+
+Slack's own Outlook Calendar integration was not a reliable signal for this: it maps every busy calendar event to a generic label like `In a meeting`, not the event's actual title, so a real "Lunch" event never showed up as `Lunch` in Slack. Reading Outlook for Mac directly gets the actual event title instead.
+
+**Recurring events:** Outlook's AppleScript dictionary reports a recurring event's `start time`/`end time` as the *original* occurrence date (when the series was first created), not today's occurrence. Matching by that date range would silently miss a daily or weekly recurring Lunch block. To work around this, the watcher matches events by title, then compares only the *time of day* (not the date) of that event's start/end against the current time, so a recurring block at the same time every day works correctly. One tradeoff: this does not check the event's specific days of the week, so if your Lunch event only recurs on weekdays, the watcher will still treat that same time window as "Lunch" on weekends too.
+
+**Requirements for this to work:**
+
+- Outlook for Mac must be installed and running. Classic Outlook for Mac supports AppleScript; if Microsoft's newer "New Outlook" client on your Mac does not support AppleScript, `zoom-slack-status status` will report that the calendar could not be read, and Lunch detection is skipped (Zoom syncing still works normally).
+- The first time it runs, macOS may prompt you to allow Terminal (or the LaunchAgent's helper) to control Outlook via Automation. Click **OK**.
+
+If you change your Slack status yourself while Lunch is active, the watcher stops tracking it and leaves your status alone. A Zoom call always takes precedence: if you join a Zoom call while Lunch status is active, the watcher leaves the Lunch status alone rather than switching to `On a Zoom call`. Likewise, a Lunch event is ignored while a Zoom call is already being tracked.
+
+Configure this with:
+
+- `ZOOM_SLACK_LUNCH_ENABLED` (default `true`)
+- `ZOOM_SLACK_LUNCH_LABELS` — calendar event titles that mean "Lunch," comma-separated, case-insensitive (default `Lunch`)
+- `ZOOM_SLACK_LUNCH_STATUS_TEXT` (default `Lunch`)
+- `ZOOM_SLACK_LUNCH_STATUS_EMOJI` (default `:fork_and_knife:`)
+- `ZOOM_SLACK_LUNCH_TTL_MINUTES` — safety-net expiration in case the watcher stops running mid-event (default `60`)
+- `ZOOM_SLACK_OUTLOOK_APP_NAME` — the Outlook application name AppleScript targets (default `Microsoft Outlook`)
 
 ## Requirements
 
@@ -284,8 +309,14 @@ ZOOM_SLACK_POLL_SECONDS=5
 ZOOM_SLACK_BUSY_CONFIRMATIONS=1
 ZOOM_SLACK_IDLE_CONFIRMATIONS=1
 ZOOM_SLACK_OUTLOOK_PRECEDENCE=true
-ZOOM_SLACK_OUTLOOK_STATUS_TEXTS=In a meeting,Working remotely,Out of office
+ZOOM_SLACK_OUTLOOK_STATUS_TEXTS=In a meeting,Working remotely,Out of office,Lunch
 ZOOM_SLACK_STATE_FILE=~/Library/Application Support/zoom-slack-status/state.json
+ZOOM_SLACK_LUNCH_ENABLED=true
+ZOOM_SLACK_LUNCH_LABELS=Lunch
+ZOOM_SLACK_LUNCH_STATUS_TEXT=Lunch
+ZOOM_SLACK_LUNCH_STATUS_EMOJI=:fork_and_knife:
+ZOOM_SLACK_LUNCH_TTL_MINUTES=60
+ZOOM_SLACK_OUTLOOK_APP_NAME=Microsoft Outlook
 ```
 
 `ZOOM_SLACK_STATUS_TTL_MINUTES` is the safety-net expiration Slack receives. The daemon refreshes it while the meeting continues.
