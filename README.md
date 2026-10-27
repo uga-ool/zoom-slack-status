@@ -2,6 +2,8 @@
 
 Automatically sets your Slack status while you are on a Zoom call, then restores your previous status when the call ends.
 
+**New here?** Follow the [step-by-step setup guide](https://uga-ool.github.io/zoom-slack-status/setup-guide/).
+
 This is a local macOS watcher. It does not need a Zoom API key. It detects an active Zoom meeting from local Zoom processes and, when available, Zoom's macOS UI state. Slack is updated with the official `users.profile.get` and `users.profile.set` Web API methods.
 
 Slack docs:
@@ -70,8 +72,9 @@ Do not generate an app-level token from **Basic Information**. App-level tokens 
 
 **Setup guide (with screenshots):**
 
-- [HTML guide](docs/setup-guide/index.html) — open in your browser (double-click the file after cloning, or use **File → Open** in Chrome/Safari)
-- [Word document](docs/Zoom-Slack-Status-Setup-Guide.docx) — printable guide with the same steps
+- [Online setup guide](https://uga-ool.github.io/zoom-slack-status/setup-guide/): open this link in any browser. This is the easiest way to follow along.
+- [Word document](docs/Zoom-Slack-Status-Setup-Guide.docx): a printable guide with the same steps.
+- [HTML file in this repo](docs/setup-guide/index.html): the source of the online guide. After cloning, double-click it to open it in your browser.
 
 Each person creates **their own** Slack app and connects it on **their own** Mac. You do not share apps, Client IDs, or `.env` files with anyone else.
 
