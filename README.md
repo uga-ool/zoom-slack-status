@@ -45,7 +45,7 @@ Slack's own Outlook Calendar integration was not a reliable signal for this: it 
 - Outlook for Mac must be installed and running. Classic Outlook for Mac supports AppleScript; if Microsoft's newer "New Outlook" client on your Mac does not support AppleScript, `zoom-slack-status status` will report that the calendar could not be read, and Lunch detection is skipped (Zoom syncing still works normally).
 - The first time it runs, macOS may prompt you to allow Terminal (or the LaunchAgent's helper) to control Outlook via Automation. Click **OK**.
 
-If you change your Slack status yourself while Lunch is active, the watcher stops tracking it and leaves your status alone. A Zoom call always takes precedence: if you join a Zoom call while Lunch status is active, the watcher leaves the Lunch status alone rather than switching to `On a Zoom call`. Likewise, a Lunch event is ignored while a Zoom call is already being tracked.
+If you change your Slack status yourself while Lunch is active, the watcher stops tracking it and leaves your status alone. Whichever status the watcher set first stays until it ends: if you join a Zoom call while the Lunch status is showing, the watcher leaves Lunch in place rather than switching to `On a Zoom call`, and a Lunch event that starts during a Zoom call is ignored.
 
 Configure this with:
 
@@ -76,7 +76,7 @@ Do not generate an app-level token from **Basic Information**. App-level tokens 
 - [Word document](docs/Zoom-Slack-Status-Setup-Guide.docx): a printable guide with the same steps.
 - [HTML file in this repo](docs/setup-guide/index.html): the source of the online guide. After cloning, double-click it to open it in your browser.
 
-Each person creates **their own** Slack app and connects it on **their own** Mac. You do not share apps, Client IDs, or `.env` files with anyone else.
+Each person creates **their own** Slack app and connects it on **their own** Mac. Do not use someone else's app, and never share your `.env` file: after setup it holds your personal Slack token.
 
 You will:
 
@@ -96,6 +96,47 @@ Slack docs:
 ### Step 1: Create your Slack app
 
 Do this once per person. Use a desktop web browser (Chrome or Safari is fine).
+
+#### Quick way: paste the app manifest
+
+A manifest is a settings file that Slack reads to set up the app for you. It fills in the redirect URL, the two profile scopes, PKCE, and token rotation in one step.
+
+1. Open [https://api.slack.com/apps](https://api.slack.com/apps) and sign in with your Slack account.
+2. Click **Create New App**, then choose **From a manifest**.
+3. Choose your work Slack **workspace**, then click **Next**.
+4. Click the **JSON** tab, delete the example text, and paste the manifest below. On GitHub, the copy button in the top-right corner of the box copies all of it. The same text is in [`slack-app-manifest.json`](slack-app-manifest.json).
+5. Click **Next**, review the summary, then click **Create**.
+6. Skip ahead to **Copy your Client ID** below.
+
+```json
+{
+  "display_information": {
+    "name": "Zoom Status Sync",
+    "description": "Sets your Slack status while you are on a Zoom call, then restores your previous status when the call ends."
+  },
+  "oauth_config": {
+    "redirect_urls": [
+      "http://localhost:8765/slack/oauth/callback"
+    ],
+    "scopes": {
+      "user": [
+        "users.profile:read",
+        "users.profile:write"
+      ]
+    },
+    "pkce_enabled": true
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": true
+  }
+}
+```
+
+Turning on PKCE cannot be undone for that app. That is expected: this watcher runs on your Mac and has no client secret, so it needs PKCE.
+
+#### Or set it up by hand
 
 1. Open [https://api.slack.com/apps](https://api.slack.com/apps) and sign in with your Slack account.
 2. Click **Create New App**.
@@ -137,10 +178,12 @@ Do not add Bot Token Scopes. This watcher only updates **your** profile status.
 
 #### Copy your Client ID
 
+Whichever way you created the app:
+
 17. In the left sidebar, click **Basic Information**.
 18. Scroll to **App Credentials**.
 19. Find **Client ID**. Click **Copy** (or select and copy the value). It looks like `1234567890.1234567890`.
-20. Keep this somewhere handy for the next step — you will paste it into your `.env` file. **Do not share your Client ID or `.env` file with others.**
+20. Keep this somewhere handy for the next step. You will paste it into your `.env` file. The Client ID is not a secret, but **never share your `.env` file**.
 
 ### Step 2: Download the project
 

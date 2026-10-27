@@ -231,12 +231,49 @@
         <li>Run a one-time Slack sign-in</li>
         <li>Install the background watcher (starts automatically at login)</li>
       </ul>
-      <div class="note"><strong>💡 Note:</strong> Each person must do this individually — do not share Client IDs or config files.</div>
+      <div class="note"><strong>Note:</strong> Each person does this individually with their own Slack app. Never share your <code>.env</code> file; after setup it holds your personal Slack token.</div>
       <p>Also available as a Word document: <a href="../Zoom-Slack-Status-Setup-Guide.docx">Zoom-Slack-Status-Setup-Guide.docx</a></p>
     </section>
 
     <section id="step-1">
       <h2>Step 1: Create Your Slack App</h2>
+
+      <h3>Quick way: paste the app manifest</h3>
+      <p>A manifest is a settings file that Slack reads to set up the app for you. It fills in every setting from this step at once.</p>
+      <ol>
+        <li>Go to <a href="https://api.slack.com/apps">api.slack.com/apps</a> and sign in.</li>
+        <li>Click <strong>Create New App</strong>, then choose <strong>From a manifest</strong>.</li>
+        <li>Choose your work Slack workspace, then click <strong>Next</strong>.</li>
+        <li>Click the <strong>JSON</strong> tab, delete the example text, and paste everything in the box below.</li>
+        <li>Click <strong>Next</strong>, then <strong>Create</strong>.</li>
+        <li>Skip ahead to <a href="#copy-client-id">Copy your Client ID</a>.</li>
+      </ol>
+      <pre>{
+  "display_information": {
+    "name": "Zoom Status Sync",
+    "description": "Sets your Slack status while you are on a Zoom call, then restores your previous status when the call ends."
+  },
+  "oauth_config": {
+    "redirect_urls": [
+      "http://localhost:8765/slack/oauth/callback"
+    ],
+    "scopes": {
+      "user": [
+        "users.profile:read",
+        "users.profile:write"
+      ]
+    },
+    "pkce_enabled": true
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": true
+  }
+}</pre>
+      <div class="note"><strong>Note:</strong> Slack may say PKCE cannot be turned off later. That is expected; this app needs it because it runs on your Mac without a client secret.</div>
+
+      <h3>Or set it up by hand</h3>
       <p>Open a web browser and go to <a href="https://api.slack.com/apps">api.slack.com/apps</a>. You will see a list of your existing apps (it may be empty). Click <strong>Create New App</strong>.</p>
       <figure>
         <img src="screenshots/01_your_apps.png" alt="Slack API page showing Create New App button">
@@ -285,7 +322,7 @@
       <h3>Opt in to token rotation (recommended)</h3>
       <p>On <strong>OAuth &amp; Permissions</strong>, find <strong>Advanced token security via token rotation</strong> and click <strong>Opt In</strong>.</p>
 
-      <h3>Copy your Client ID</h3>
+      <h3 id="copy-client-id">Copy your Client ID</h3>
       <p>In the left sidebar, click <strong>Basic Information</strong>. Scroll to <strong>App Credentials</strong> and find your <strong>Client ID</strong>. Click <strong>Copy</strong> — you will need it in Step 3.</p>
       <figure>
         <img src="screenshots/07_client_id.png" alt="Basic Information page showing Client ID">
@@ -358,8 +395,8 @@ open -e .env</pre>
 /usr/bin/python3 -m zoom_slack_status oauth login --env-file .env
 /usr/bin/python3 -m zoom_slack_status launch-agent install --env-file .env</pre>
 
-      <h3>Status takes too long to clear after leaving a call</h3>
-      <p>Add this line to your <code>.env</code> file and reinstall the agent:</p>
+      <h3>Status flickers when leaving a call</h3>
+      <p>If your status briefly switches back and forth as a call ends, add this line to your <code>.env</code> file, then run the install command from Step 5 again. Your status will take about 10 seconds to clear instead of 5.</p>
       <pre>ZOOM_SLACK_IDLE_CONFIRMATIONS=2</pre>
 
       <h3>View logs</h3>

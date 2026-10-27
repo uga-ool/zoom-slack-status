@@ -1,0 +1,23 @@
+{
+  "display_information": {
+    "name": "Zoom Status Sync",
+    "description": "Sets your Slack status while you are on a Zoom call, then restores your previous status when the call ends."
+  },
+  "oauth_config": {
+    "redirect_urls": [
+      "http://localhost:8765/slack/oauth/callback"
+    ],
+    "scopes": {
+      "user": [
+        "users.profile:read",
+        "users.profile:write"
+      ]
+    },
+    "pkce_enabled": true
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": true
+  }
+}

@@ -14,6 +14,12 @@ from .slack import SlackApiError, SlackClient
 from .zoom import ZoomDetector
 
 
+CLI = "/usr/bin/python3 -m zoom_slack_status"
+LOGIN_FIX = (
+    f"From the project folder, run {CLI} oauth login --env-file .env "
+    f"then {CLI} launch-agent install --env-file .env"
+)
+INSTALL_FIX = f"From the project folder, run {CLI} launch-agent install --env-file .env"
 ERROR_LOG_PATH = Path("~/Library/Logs/zoom-slack-status.err.log").expanduser()
 ACCESSIBILITY_SCRIPT = (
     'tell application "System Events" to count UI elements of '
@@ -52,7 +58,7 @@ def run_checks(
         calendar_detector = calendar_detector or OutlookCalendarDetector(
             app_name=config.outlook_app_name, subject_filters=config.lunch_labels
         )
-        checks.append(_check_outlook_calendar(calendar_detector))
+        checks.append(_check_outlook_calendar(calendar_detector, config.outlook_app_name, run))
     checks.append(_check_launch_agent(run))
     return checks
 
@@ -92,7 +98,7 @@ def _check_env_file(env_file: Path) -> Check:
 
 
 def _check_slack(config: Config, slack: Optional[SlackClient], now: float) -> Check:
-    login_fix = "Run oauth login, then launch-agent install."
+    login_fix = LOGIN_FIX
     if slack is None or not config.slack_user_token:
         return Check("Slack", False, "not connected (SLACK_USER_TOKEN is empty)", login_fix)
     try:
@@ -141,8 +147,17 @@ def _check_accessibility(run: Callable[..., subprocess.CompletedProcess]) -> Che
     )
 
 
-def _check_outlook_calendar(calendar_detector: OutlookCalendarDetector) -> Check:
+def _check_outlook_calendar(
+    calendar_detector: OutlookCalendarDetector,
+    app_name: str,
+    run: Callable[..., subprocess.CompletedProcess],
+) -> Check:
     name = "Outlook calendar for Lunch (optional)"
+    # The calendar script returns no events when Outlook is closed, which looks like a
+    # successful read, so check that Outlook is running first.
+    running = run(["/usr/bin/pgrep", "-x", app_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    if running.returncode != 0:
+        return Check(name, False, f"{app_name} is not running", "Open Outlook for Mac, then run doctor again.", required=False)
     calendar_check = calendar_detector.current_event_titles()
     if calendar_check.checked:
         titles = ", ".join(calendar_check.event_titles) or "no Lunch event right now"
@@ -158,7 +173,7 @@ def _check_outlook_calendar(calendar_detector: OutlookCalendarDetector) -> Check
 
 def _check_launch_agent(run: Callable[..., subprocess.CompletedProcess]) -> Check:
     name = "Background watcher"
-    install_fix = "Run launch-agent install."
+    install_fix = INSTALL_FIX
     if LEGACY_PLIST_PATH.exists():
         return Check(name, False, "an older copy is installed", install_fix)
     if not PLIST_PATH.exists():
