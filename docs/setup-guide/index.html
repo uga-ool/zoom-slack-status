@@ -251,7 +251,7 @@
 
       <h3>Name your app and choose a workspace</h3>
       <p>Give your app a personal name so you can identify it later. Include your name to keep it distinct from teammates&rsquo; apps:</p>
-      <pre>Zoom Status Sync – Todd</pre>
+      <pre>Zoom Status Sync – Your Name</pre>
       <p>Select your work Slack workspace from the dropdown and click <strong>Create App</strong>.</p>
       <figure>
         <img src="screenshots/03_app_name.png" alt="App name and workspace selection form">
@@ -344,15 +344,16 @@ open -e .env</pre>
 
     <section id="verify">
       <h2>Verify It&rsquo;s Working</h2>
-      <p>Join a Zoom test call and check your Slack status. To manually check what the watcher sees, run:</p>
-      <pre>/usr/bin/python3 -m zoom_slack_status status --env-file .env</pre>
+      <p>Join a Zoom test call and check your Slack status. To check the whole setup, run:</p>
+      <pre>/usr/bin/python3 -m zoom_slack_status doctor</pre>
+      <p>Each line starts with <code>[ok]</code>, <code>[!!]</code> (a problem, with a suggested fix underneath), or <code>[--]</code> (optional and not set up).</p>
     </section>
 
     <section id="troubleshooting">
       <h2>Troubleshooting</h2>
 
-      <h3>Status stopped updating after a few weeks</h3>
-      <p>Token rotation may have expired your token. Re-run Steps 4 and 5:</p>
+      <h3>Status stopped updating</h3>
+      <p>The watcher renews your Slack connection automatically, but Slack ends it if your Mac has been off for more than 30 days. Run <code>doctor</code> (above). If it reports a Slack problem, re-run Steps 4 and 5:</p>
       <pre>cd ~/Documents/zoom-slack-status
 /usr/bin/python3 -m zoom_slack_status oauth login --env-file .env
 /usr/bin/python3 -m zoom_slack_status launch-agent install --env-file .env</pre>

@@ -4,6 +4,7 @@ import base64
 import hashlib
 import html
 import json
+import logging
 import secrets
 import time
 import urllib.error
@@ -13,13 +14,15 @@ import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
+from .config import read_env_file
 from .slack import API_BASE, SlackApiError
 
 
 DEFAULT_REDIRECT_URI = "http://localhost:8765/slack/oauth/callback"
 DEFAULT_USER_SCOPES = ("users.profile:read", "users.profile:write")
+TOKEN_REFRESH_MARGIN_SECONDS = 600
 
 
 @dataclass(frozen=True)
@@ -172,21 +175,81 @@ def exchange_code_for_token(
         "redirect_uri": redirect_uri,
         "code_verifier": verifier,
     }
-    response = _oauth_request(payload)
-    authed_user = response.get("authed_user") or {}
-    access_token = authed_user.get("access_token") or response.get("access_token") or ""
-    if not access_token:
-        raise SlackApiError("Slack OAuth response did not include a user access token.")
+    return _token_from_response(_oauth_request(payload))
 
-    team = response.get("team") or {}
-    return OAuthToken(
-        access_token=str(access_token),
-        token_type=str(authed_user.get("token_type") or response.get("token_type") or ""),
-        user_id=str(authed_user.get("id") or ""),
-        team_id=str(team.get("id") or response.get("team_id") or ""),
-        refresh_token=str(authed_user.get("refresh_token") or response.get("refresh_token") or ""),
-        expires_in=int(authed_user.get("expires_in") or response.get("expires_in") or 0),
-    )
+
+def refresh_access_token(*, client_id: str, refresh_token: str) -> OAuthToken:
+    # PKCE apps are public clients, so Slack refreshes without a client secret.
+    payload = {
+        "client_id": client_id,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    return _token_from_response(_oauth_request(payload))
+
+
+class TokenRefresher:
+    """Keeps a rotating Slack user token fresh and writes each new token back to the env file."""
+
+    def __init__(
+        self,
+        *,
+        env_file: Path,
+        client_id: str,
+        refresh_token: str,
+        expires_at: int,
+        refresh: Callable[..., OAuthToken] = refresh_access_token,
+        logger: Optional[logging.Logger] = None,
+    ) -> None:
+        self.env_file = env_file
+        self.client_id = client_id
+        self.refresh_token = refresh_token
+        self.expires_at = expires_at
+        self._refresh = refresh
+        self.logger = logger or logging.getLogger(__name__)
+
+    def needs_refresh(self, *, now: Optional[float] = None) -> bool:
+        now = time.time() if now is None else now
+        return bool(self.expires_at) and self.expires_at - now <= TOKEN_REFRESH_MARGIN_SECONDS
+
+    def refresh(self) -> str:
+        # Another process (doctor, or a second command) may already have refreshed this file.
+        # Reusing our in-memory refresh token after that would fail, because it is single-use.
+        saved_token = self._adopt_saved_token()
+        if saved_token and not self.needs_refresh():
+            return saved_token
+
+        try:
+            token = self._refresh(client_id=self.client_id, refresh_token=self.refresh_token)
+        except SlackApiError as exc:
+            raise SlackApiError(
+                f"Could not refresh the Slack token ({exc}). Run oauth login again, then launch-agent install."
+            ) from exc
+
+        # Slack revokes the old refresh token shortly after use, so save the new one right away.
+        values = {"SLACK_USER_TOKEN": token.access_token}
+        if token.refresh_token:
+            self.refresh_token = token.refresh_token
+            values["SLACK_REFRESH_TOKEN"] = token.refresh_token
+        self.expires_at = token.expires_at
+        if self.expires_at:
+            values["SLACK_TOKEN_EXPIRES_AT"] = str(self.expires_at)
+        update_env_file(self.env_file, values)
+        self.logger.info("Refreshed Slack token; it now expires at %s.", self.expires_at or "(unknown)")
+        return token.access_token
+
+    def _adopt_saved_token(self) -> str:
+        saved = read_env_file(self.env_file)
+        saved_refresh = saved.get("SLACK_REFRESH_TOKEN", "")
+        if not saved_refresh or saved_refresh == self.refresh_token:
+            return ""
+        self.refresh_token = saved_refresh
+        try:
+            self.expires_at = int(saved.get("SLACK_TOKEN_EXPIRES_AT") or 0)
+        except ValueError:
+            self.expires_at = 0
+        self.logger.info("Using the Slack token another process already refreshed.")
+        return saved.get("SLACK_USER_TOKEN", "")
 
 
 def save_oauth_env(
@@ -204,6 +267,8 @@ def save_oauth_env(
         "SLACK_TEAM_ID": token.team_id,
         "SLACK_TOKEN_TYPE": token.token_type,
     }
+    if token.refresh_token:
+        values["SLACK_REFRESH_TOKEN"] = token.refresh_token
     if token.expires_in:
         values["SLACK_TOKEN_EXPIRES_AT"] = str(token.expires_at)
 
@@ -229,15 +294,18 @@ def update_env_file(env_file: Path, values: Dict[str, str]) -> None:
         updated.append(f"{key}={_env_value(value)}\n")
 
     env_file.parent.mkdir(parents=True, exist_ok=True)
-    env_file.write_text("".join(updated), encoding="utf-8")
-    env_file.chmod(0o600)
+    # Write atomically so a crash mid-write cannot lose a single-use refresh token.
+    temp_path = env_file.with_name(env_file.name + ".tmp")
+    temp_path.write_text("".join(updated), encoding="utf-8")
+    temp_path.chmod(0o600)
+    temp_path.replace(env_file)
 
 
 def open_authorize_url(url: str) -> bool:
     return bool(webbrowser.open(url, new=2, autoraise=True))
 
 
-def _oauth_request(payload: Dict[str, str]) -> Dict[str, object]:
+def _oauth_request(payload: Dict[str, str]) -> Dict[str, Any]:
     body = urllib.parse.urlencode(payload).encode("utf-8")
     request = urllib.request.Request(
         API_BASE + "oauth.v2.access",
@@ -264,6 +332,24 @@ def _oauth_request(payload: Dict[str, str]) -> Dict[str, object]:
         error = parsed.get("error", "unknown_error")
         raise SlackApiError(f"Slack OAuth error: {error}")
     return parsed
+
+
+def _token_from_response(response: Dict[str, Any]) -> OAuthToken:
+    # The code exchange nests user tokens under authed_user; a refresh returns them at the top level.
+    authed_user = response.get("authed_user") or {}
+    access_token = authed_user.get("access_token") or response.get("access_token") or ""
+    if not access_token:
+        raise SlackApiError("Slack OAuth response did not include a user access token.")
+
+    team = response.get("team") or {}
+    return OAuthToken(
+        access_token=str(access_token),
+        token_type=str(authed_user.get("token_type") or response.get("token_type") or ""),
+        user_id=str(authed_user.get("id") or response.get("user_id") or ""),
+        team_id=str(team.get("id") or response.get("team_id") or ""),
+        refresh_token=str(authed_user.get("refresh_token") or response.get("refresh_token") or ""),
+        expires_in=int(authed_user.get("expires_in") or response.get("expires_in") or 0),
+    )
 
 
 def _first(query: Dict[str, list[str]], key: str) -> str:

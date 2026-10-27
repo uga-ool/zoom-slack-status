@@ -8,9 +8,10 @@ import time
 from pathlib import Path
 
 from .config import Config, config_from_env, load_env_file, validate_config
-from .launch_agent import install as install_launch_agent
+from .doctor import format_checks, run_checks
+from .launch_agent import APP_ENV_PATH, install as install_launch_agent
 from .launch_agent import plist_xml, uninstall as uninstall_launch_agent
-from .oauth import DEFAULT_REDIRECT_URI, build_authorize_url, code_challenge
+from .oauth import DEFAULT_REDIRECT_URI, TokenRefresher, build_authorize_url, code_challenge
 from .oauth import exchange_code_for_token, generate_code_verifier, open_authorize_url
 from .oauth import save_oauth_env, wait_for_local_callback
 from .outlook import is_outlook_calendar_status
@@ -54,6 +55,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = subparsers.add_parser("status", parents=[parent], help="Show Zoom and Slack status.")
     status.set_defaults(func=command_status)
+
+    # doctor has its own --env-file so it checks the background helper's settings once installed.
+    doctor = subparsers.add_parser("doctor", help="Check that everything is set up.")
+    doctor.add_argument(
+        "--env-file",
+        default=str(APP_ENV_PATH) if APP_ENV_PATH.exists() else ".env",
+        help="Path to env file. Defaults to the background helper's copy once installed.",
+    )
+    doctor.add_argument("--verbose", action="store_true", help="Enable debug logging.")
+    doctor.set_defaults(func=command_doctor, dry_run=False)
 
     daemon = subparsers.add_parser("daemon", parents=[parent], help="Run the polling daemon.")
     daemon.add_argument("--once", action="store_true", help="Run one poll and exit.")
@@ -102,7 +113,7 @@ def command_status(args: argparse.Namespace) -> int:
     print(f"Signal: {zoom_state.signal} ({zoom_state.detail})")
 
     if config.slack_user_token or config.dry_run:
-        slack = SlackClient(config.slack_user_token, dry_run=config.dry_run)
+        slack = _slack_client(config, args)
         status = slack.get_status()
         print(f"Slack: {status.emoji} {status.text}".strip())
         print(f"Slack expiration: {status.expiration}")
@@ -114,11 +125,19 @@ def command_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_doctor(args: argparse.Namespace) -> int:
+    config = _config(args)
+    slack = _slack_client(config, args) if config.slack_user_token else None
+    checks = run_checks(config, Path(args.env_file), slack=slack)
+    sys.stdout.write(format_checks(checks))
+    return 0 if all(check.ok or not check.required for check in checks) else 1
+
+
 def command_daemon(args: argparse.Namespace) -> int:
     config = _config(args, interval=args.interval)
     validate_config(config)
     detector = ZoomDetector()
-    synchronizer = _synchronizer(config)
+    synchronizer = _synchronizer(config, args)
 
     if args.once:
         zoom_state = detector.detect()
@@ -138,14 +157,14 @@ def command_daemon(args: argparse.Namespace) -> int:
 def command_set_busy(args: argparse.Namespace) -> int:
     config = _config(args)
     validate_config(config)
-    _synchronizer(config).force_busy()
+    _synchronizer(config, args).force_busy()
     return 0
 
 
 def command_restore(args: argparse.Namespace) -> int:
     config = _config(args)
     validate_config(config)
-    _synchronizer(config).restore()
+    _synchronizer(config, args).restore()
     return 0
 
 
@@ -194,7 +213,7 @@ def command_oauth_login(args: argparse.Namespace) -> int:
     )
     print(f"Saved Slack user token for user {token.user_id or '(unknown)'} to {args.env_file}.")
     if token.refresh_token:
-        print("Warning: Slack returned a rotating token. Disable token rotation for now, or rerun oauth login when this token expires.")
+        print("Token rotation is on; the background helper will refresh the token automatically.")
     print("Run launch-agent install again to use this token in the background helper.")
     return 0
 
@@ -274,10 +293,31 @@ def _config(args: argparse.Namespace, *, interval: int | None = None) -> Config:
     return config_from_env(dry_run=args.dry_run, interval=interval)
 
 
-def _synchronizer(config: Config) -> StatusSynchronizer:
-    slack = SlackClient(config.slack_user_token, dry_run=config.dry_run)
+def _slack_client(config: Config, args: argparse.Namespace) -> SlackClient:
+    refresher = None
+    env_file = Path(args.env_file)
+    can_refresh = config.slack_refresh_token and config.slack_client_id and not config.dry_run
+    if can_refresh and _owns_refresh_token(env_file):
+        refresher = TokenRefresher(
+            env_file=env_file,
+            client_id=config.slack_client_id,
+            refresh_token=config.slack_refresh_token,
+            expires_at=config.slack_token_expires_at,
+        )
+    return SlackClient(config.slack_user_token, dry_run=config.dry_run, token_refresher=refresher)
+
+
+def _owns_refresh_token(env_file: Path) -> bool:
+    # Refresh tokens are single-use. Once the background helper is installed, only its copy
+    # of .env may refresh; otherwise the two copies would invalidate each other's tokens.
+    if not APP_ENV_PATH.exists():
+        return True
+    return env_file.expanduser().resolve() == APP_ENV_PATH.resolve()
+
+
+def _synchronizer(config: Config, args: argparse.Namespace) -> StatusSynchronizer:
     store = StateStore(config.state_file)
-    return StatusSynchronizer(config, slack, store)
+    return StatusSynchronizer(config, _slack_client(config, args), store)
 
 
 if __name__ == "__main__":

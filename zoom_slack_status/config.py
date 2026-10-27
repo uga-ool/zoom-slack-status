@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 
 DEFAULT_STATE_FILE = "~/Library/Application Support/zoom-slack-status/state.json"
@@ -24,6 +24,9 @@ class Config:
     dry_run: bool
     outlook_precedence: bool
     outlook_status_texts: frozenset[str]
+    slack_client_id: str = ""
+    slack_refresh_token: str = ""
+    slack_token_expires_at: int = 0
 
     @property
     def status_ttl_seconds(self) -> int:
@@ -38,10 +41,16 @@ def load_env_file(path: Optional[str]) -> None:
     if not path:
         return
 
-    env_path = Path(path).expanduser()
-    if not env_path.exists():
-        return
+    for key, value in read_env_file(Path(path)).items():
+        os.environ.setdefault(key, value)
 
+
+def read_env_file(path: Path) -> Dict[str, str]:
+    env_path = path.expanduser()
+    if not env_path.exists():
+        return {}
+
+    values: Dict[str, str] = {}
     for raw_line in env_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -52,9 +61,9 @@ def load_env_file(path: Optional[str]) -> None:
             continue
         key, value = line.split("=", 1)
         key = key.strip()
-        value = _strip_quotes(value.strip())
         if key:
-            os.environ.setdefault(key, value)
+            values.setdefault(key, _strip_quotes(value.strip()))
+    return values
 
 
 def config_from_env(*, dry_run: bool = False, interval: Optional[int] = None) -> Config:
@@ -76,6 +85,9 @@ def config_from_env(*, dry_run: bool = False, interval: Optional[int] = None) ->
         outlook_status_texts=_parse_outlook_status_texts(
             os.environ.get("ZOOM_SLACK_OUTLOOK_STATUS_TEXTS", DEFAULT_OUTLOOK_STATUS_TEXTS)
         ),
+        slack_client_id=os.environ.get("SLACK_CLIENT_ID", "").strip(),
+        slack_refresh_token=os.environ.get("SLACK_REFRESH_TOKEN", "").strip(),
+        slack_token_expires_at=_env_int("SLACK_TOKEN_EXPIRES_AT", 0),
     )
 
 

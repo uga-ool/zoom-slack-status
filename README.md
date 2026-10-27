@@ -12,7 +12,7 @@ Slack docs:
 ## What It Does
 
 - Detects active Zoom meetings on macOS.
-- Sets your Slack status to `:zoom: On a Zoom call`.
+- Sets your Slack status to `:video_camera: On a Zoom call`.
 - Stores your previous Slack status before changing it.
 - Restores that previous status when the Zoom meeting ends.
 - Skips restore if you manually changed your Slack status during the call.
@@ -72,7 +72,7 @@ Do this once per person. Use a desktop web browser (Chrome or Safari is fine).
 1. Open [https://api.slack.com/apps](https://api.slack.com/apps) and sign in with your Slack account.
 2. Click **Create New App**.
 3. Choose **From scratch**.
-4. Enter an app name you will recognize later, for example **Zoom Status Sync – Todd**.
+4. Enter an app name you will recognize later, for example **Zoom Status Sync – Your Name**.
 5. Choose the Slack **workspace** where you want status updates (usually your work workspace).
 6. Click **Create App**.
 
@@ -188,17 +188,17 @@ To update later, open Terminal, run `cd ~/Documents/zoom-slack-status`, then `gi
 
 ### Token rotation
 
-When token rotation is enabled, Slack issues short-lived user tokens. This helper stores the access token in `.env` but does not automatically refresh it yet.
+When token rotation is enabled, Slack issues user tokens that last 12 hours, plus a refresh token. OAuth login saves both to `.env` (`SLACK_USER_TOKEN`, `SLACK_REFRESH_TOKEN`, and `SLACK_TOKEN_EXPIRES_AT`). The background helper refreshes the token about 10 minutes before it expires and saves the new one to its own copy of `.env` in `~/Library/Application Support/zoom-slack-status/`. You do not need to do anything.
 
-If status updates stop working, rerun OAuth login and reinstall the LaunchAgent:
+Each refresh token works only once. After the helper is installed, only its copy refreshes; commands you run from `~/Documents/zoom-slack-status` use the token as-is. Reinstalling keeps the helper's newer token unless you have just run `oauth login` again.
+
+Slack expires refresh tokens for PKCE apps after 30 days without use. If your Mac is off or asleep for longer than that, or if `doctor` reports a Slack problem, connect again:
 
 ```sh
 cd ~/Documents/zoom-slack-status
 /usr/bin/python3 -m zoom_slack_status oauth login --env-file .env
 /usr/bin/python3 -m zoom_slack_status launch-agent install --env-file .env
 ```
-
-OAuth login writes `SLACK_TOKEN_EXPIRES_AT` when Slack returns an expiration. If you see a warning about a rotating token during login, complete the steps above before the token expires.
 
 ### Manual token setup (optional)
 
@@ -207,6 +207,14 @@ You can skip OAuth login if you already have a user token. It must start with `x
 Do not use an app-level token from **Basic Information**. App-level tokens start with `xapp-` and cannot update your profile status.
 
 ## Try It
+
+Check that everything is set up. Each line starts with `[ok]`, `[!!]` (a problem, with a suggested fix), or `[--]` (optional and not set up):
+
+```sh
+/usr/bin/python3 -m zoom_slack_status doctor
+```
+
+Once the background watcher is installed, `doctor` checks the watcher's own settings in `~/Library/Application Support/zoom-slack-status/.env`. Pass `--env-file .env` to check the project copy instead.
 
 From `~/Documents/zoom-slack-status`, check what the watcher currently sees:
 
@@ -265,6 +273,9 @@ All settings are optional except `SLACK_USER_TOKEN` when not using `--dry-run`.
 SLACK_CLIENT_ID=1234567890.1234567890
 SLACK_REDIRECT_URI=http://localhost:8765/slack/oauth/callback
 SLACK_USER_TOKEN=xoxp-your-user-token
+# Written by oauth login when token rotation is on; refreshed automatically.
+SLACK_REFRESH_TOKEN=xoxe-1-your-refresh-token
+SLACK_TOKEN_EXPIRES_AT=1700000000
 ZOOM_SLACK_STATUS_TEXT=On a Zoom call
 ZOOM_SLACK_STATUS_EMOJI=:video_camera:
 ZOOM_SLACK_STATUS_TTL_MINUTES=120
