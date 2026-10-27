@@ -5,7 +5,10 @@ import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+if TYPE_CHECKING:
+    from .oauth import TokenRefresher
 
 
 API_BASE = "https://slack.com/api/"
@@ -64,16 +67,28 @@ class SlackRateLimitError(SlackApiError):
         super().__init__(message)
 
 
+class SlackAuthError(SlackApiError):
+    def __init__(self, method: str, error: str) -> None:
+        self.error = error
+        super().__init__(f"Slack API error from {method}: {error}")
+
+
+# Errors a token refresh can fix. token_revoked is not one of them.
+REFRESHABLE_AUTH_ERRORS = frozenset({"token_expired", "invalid_auth"})
+
+
 class SlackClient:
     def __init__(
         self,
         token: str,
         *,
         dry_run: bool = False,
+        token_refresher: Optional["TokenRefresher"] = None,
         logger: Optional[logging.Logger] = None,
     ) -> None:
         self.token = token
         self.dry_run = dry_run
+        self.token_refresher = token_refresher
         self.logger = logger or logging.getLogger(__name__)
         self._dry_run_status = SlackStatus("", "", 0)
 
@@ -103,6 +118,24 @@ class SlackClient:
         )
 
     def _request(
+        self,
+        method: str,
+        *,
+        http_method: str,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if self.token_refresher and self.token_refresher.needs_refresh():
+            self.token = self.token_refresher.refresh()
+        try:
+            return self._send(method, http_method=http_method, payload=payload)
+        except SlackAuthError as exc:
+            if not self.token_refresher or exc.error not in REFRESHABLE_AUTH_ERRORS:
+                raise
+            self.logger.info("Slack rejected the token (%s); refreshing and retrying once.", exc.error)
+            self.token = self.token_refresher.refresh()
+            return self._send(method, http_method=http_method, payload=payload)
+
+    def _send(
         self,
         method: str,
         *,
@@ -144,6 +177,8 @@ class SlackClient:
 
         if not parsed.get("ok"):
             error = parsed.get("error", "unknown_error")
+            if error in REFRESHABLE_AUTH_ERRORS or error == "token_revoked":
+                raise SlackAuthError(method, error)
             raise SlackApiError(f"Slack API error from {method}: {error}")
 
         return parsed

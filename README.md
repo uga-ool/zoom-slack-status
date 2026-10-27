@@ -12,12 +12,13 @@ Slack docs:
 ## What It Does
 
 - Detects active Zoom meetings on macOS.
-- Sets your Slack status to `:zoom: On a Zoom call`.
+- Sets your Slack status to `:video_camera: On a Zoom call`.
 - Stores your previous Slack status before changing it.
 - Restores that previous status when the Zoom meeting ends.
 - Skips restore if you manually changed your Slack status during the call.
 - Yields to Slack's Outlook Calendar app when it has already set your status.
 - Uses a status expiration as a safety net, so the Zoom status will not stay forever if the watcher stops.
+- Recognizes a `Lunch` calendar event in Outlook for Mac and sets your Slack status to `:fork_and_knife: Lunch`, restoring your previous status when the event ends.
 
 ## Status Precedence
 
@@ -28,6 +29,30 @@ When Outlook Calendar has already set your Slack status to one of its default la
 This detection is based on Slack status text labels, not on reading Outlook directly. Slack's Outlook Calendar app often appends `• Outlook Calendar` to the status text (for example, `In a meeting • Outlook Calendar`); this watcher treats those as Outlook-owned. Outlook Calendar will not override a status you set yourself, so if this watcher sets `On a Zoom call` first, Outlook cannot take over until the watcher yields (for example, when refresh detects a different status).
 
 Disable precedence with `ZOOM_SLACK_OUTLOOK_PRECEDENCE=false`, or customize the Outlook labels with `ZOOM_SLACK_OUTLOOK_STATUS_TEXTS`.
+
+## Lunch Status
+
+This watcher can read your calendar directly from **Outlook for Mac** via AppleScript, and set your Slack status to `:fork_and_knife: Lunch` whenever a calendar event whose title matches one of your configured labels (default: `Lunch`) is happening right now. It stores your previous Slack status and restores it when the event ends.
+
+Slack's own Outlook Calendar integration was not a reliable signal for this: it maps every busy calendar event to a generic label like `In a meeting`, not the event's actual title, so a real "Lunch" event never showed up as `Lunch` in Slack. Reading Outlook for Mac directly gets the actual event title instead.
+
+**Recurring events:** Outlook's AppleScript dictionary reports a recurring event's `start time`/`end time` as the *original* occurrence date (when the series was first created), not today's occurrence. Matching by that date range would silently miss a daily or weekly recurring Lunch block. To work around this, the watcher matches events by title, then compares only the *time of day* (not the date) of that event's start/end against the current time, so a recurring block at the same time every day works correctly. One tradeoff: this does not check the event's specific days of the week, so if your Lunch event only recurs on weekdays, the watcher will still treat that same time window as "Lunch" on weekends too.
+
+**Requirements for this to work:**
+
+- Outlook for Mac must be installed and running. Classic Outlook for Mac supports AppleScript; if Microsoft's newer "New Outlook" client on your Mac does not support AppleScript, `zoom-slack-status status` will report that the calendar could not be read, and Lunch detection is skipped (Zoom syncing still works normally).
+- The first time it runs, macOS may prompt you to allow Terminal (or the LaunchAgent's helper) to control Outlook via Automation. Click **OK**.
+
+If you change your Slack status yourself while Lunch is active, the watcher stops tracking it and leaves your status alone. A Zoom call always takes precedence: if you join a Zoom call while Lunch status is active, the watcher leaves the Lunch status alone rather than switching to `On a Zoom call`. Likewise, a Lunch event is ignored while a Zoom call is already being tracked.
+
+Configure this with:
+
+- `ZOOM_SLACK_LUNCH_ENABLED` (default `true`)
+- `ZOOM_SLACK_LUNCH_LABELS` — calendar event titles that mean "Lunch," comma-separated, case-insensitive (default `Lunch`)
+- `ZOOM_SLACK_LUNCH_STATUS_TEXT` (default `Lunch`)
+- `ZOOM_SLACK_LUNCH_STATUS_EMOJI` (default `:fork_and_knife:`)
+- `ZOOM_SLACK_LUNCH_TTL_MINUTES` — safety-net expiration in case the watcher stops running mid-event (default `60`)
+- `ZOOM_SLACK_OUTLOOK_APP_NAME` — the Outlook application name AppleScript targets (default `Microsoft Outlook`)
 
 ## Requirements
 
@@ -72,7 +97,7 @@ Do this once per person. Use a desktop web browser (Chrome or Safari is fine).
 1. Open [https://api.slack.com/apps](https://api.slack.com/apps) and sign in with your Slack account.
 2. Click **Create New App**.
 3. Choose **From scratch**.
-4. Enter an app name you will recognize later, for example **Zoom Status Sync – Todd**.
+4. Enter an app name you will recognize later, for example **Zoom Status Sync – Your Name**.
 5. Choose the Slack **workspace** where you want status updates (usually your work workspace).
 6. Click **Create App**.
 
@@ -188,17 +213,17 @@ To update later, open Terminal, run `cd ~/Documents/zoom-slack-status`, then `gi
 
 ### Token rotation
 
-When token rotation is enabled, Slack issues short-lived user tokens. This helper stores the access token in `.env` but does not automatically refresh it yet.
+When token rotation is enabled, Slack issues user tokens that last 12 hours, plus a refresh token. OAuth login saves both to `.env` (`SLACK_USER_TOKEN`, `SLACK_REFRESH_TOKEN`, and `SLACK_TOKEN_EXPIRES_AT`). The background helper refreshes the token about 10 minutes before it expires and saves the new one to its own copy of `.env` in `~/Library/Application Support/zoom-slack-status/`. You do not need to do anything.
 
-If status updates stop working, rerun OAuth login and reinstall the LaunchAgent:
+Each refresh token works only once. After the helper is installed, only its copy refreshes; commands you run from `~/Documents/zoom-slack-status` use the token as-is. Reinstalling keeps the helper's newer token unless you have just run `oauth login` again.
+
+Slack expires refresh tokens for PKCE apps after 30 days without use. If your Mac is off or asleep for longer than that, or if `doctor` reports a Slack problem, connect again:
 
 ```sh
 cd ~/Documents/zoom-slack-status
 /usr/bin/python3 -m zoom_slack_status oauth login --env-file .env
 /usr/bin/python3 -m zoom_slack_status launch-agent install --env-file .env
 ```
-
-OAuth login writes `SLACK_TOKEN_EXPIRES_AT` when Slack returns an expiration. If you see a warning about a rotating token during login, complete the steps above before the token expires.
 
 ### Manual token setup (optional)
 
@@ -207,6 +232,14 @@ You can skip OAuth login if you already have a user token. It must start with `x
 Do not use an app-level token from **Basic Information**. App-level tokens start with `xapp-` and cannot update your profile status.
 
 ## Try It
+
+Check that everything is set up. Each line starts with `[ok]`, `[!!]` (a problem, with a suggested fix), or `[--]` (optional and not set up):
+
+```sh
+/usr/bin/python3 -m zoom_slack_status doctor
+```
+
+Once the background watcher is installed, `doctor` checks the watcher's own settings in `~/Library/Application Support/zoom-slack-status/.env`. Pass `--env-file .env` to check the project copy instead.
 
 From `~/Documents/zoom-slack-status`, check what the watcher currently sees:
 
@@ -265,6 +298,9 @@ All settings are optional except `SLACK_USER_TOKEN` when not using `--dry-run`.
 SLACK_CLIENT_ID=1234567890.1234567890
 SLACK_REDIRECT_URI=http://localhost:8765/slack/oauth/callback
 SLACK_USER_TOKEN=xoxp-your-user-token
+# Written by oauth login when token rotation is on; refreshed automatically.
+SLACK_REFRESH_TOKEN=xoxe-1-your-refresh-token
+SLACK_TOKEN_EXPIRES_AT=1700000000
 ZOOM_SLACK_STATUS_TEXT=On a Zoom call
 ZOOM_SLACK_STATUS_EMOJI=:video_camera:
 ZOOM_SLACK_STATUS_TTL_MINUTES=120
@@ -273,8 +309,14 @@ ZOOM_SLACK_POLL_SECONDS=5
 ZOOM_SLACK_BUSY_CONFIRMATIONS=1
 ZOOM_SLACK_IDLE_CONFIRMATIONS=1
 ZOOM_SLACK_OUTLOOK_PRECEDENCE=true
-ZOOM_SLACK_OUTLOOK_STATUS_TEXTS=In a meeting,Working remotely,Out of office
+ZOOM_SLACK_OUTLOOK_STATUS_TEXTS=In a meeting,Working remotely,Out of office,Lunch
 ZOOM_SLACK_STATE_FILE=~/Library/Application Support/zoom-slack-status/state.json
+ZOOM_SLACK_LUNCH_ENABLED=true
+ZOOM_SLACK_LUNCH_LABELS=Lunch
+ZOOM_SLACK_LUNCH_STATUS_TEXT=Lunch
+ZOOM_SLACK_LUNCH_STATUS_EMOJI=:fork_and_knife:
+ZOOM_SLACK_LUNCH_TTL_MINUTES=60
+ZOOM_SLACK_OUTLOOK_APP_NAME=Microsoft Outlook
 ```
 
 `ZOOM_SLACK_STATUS_TTL_MINUTES` is the safety-net expiration Slack receives. The daemon refreshes it while the meeting continues.

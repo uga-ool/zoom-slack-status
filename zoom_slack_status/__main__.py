@@ -8,12 +8,14 @@ import time
 from pathlib import Path
 
 from .config import Config, config_from_env, load_env_file, validate_config
-from .launch_agent import install as install_launch_agent
+from .doctor import format_checks, run_checks
+from .launch_agent import APP_ENV_PATH, install as install_launch_agent
 from .launch_agent import plist_xml, uninstall as uninstall_launch_agent
-from .oauth import DEFAULT_REDIRECT_URI, build_authorize_url, code_challenge
+from .oauth import DEFAULT_REDIRECT_URI, TokenRefresher, build_authorize_url, code_challenge
 from .oauth import exchange_code_for_token, generate_code_verifier, open_authorize_url
 from .oauth import save_oauth_env, wait_for_local_callback
-from .outlook import is_outlook_calendar_status
+from .outlook import any_lunch_event, is_outlook_calendar_status
+from .outlook_calendar import OutlookCalendarDetector
 from .slack import SlackApiError, SlackClient, SlackRateLimitError
 from .sync import StateStore, StatusSynchronizer
 from .zoom import ZoomDetector
@@ -54,6 +56,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     status = subparsers.add_parser("status", parents=[parent], help="Show Zoom and Slack status.")
     status.set_defaults(func=command_status)
+
+    # doctor has its own --env-file so it checks the background helper's settings once installed.
+    doctor = subparsers.add_parser("doctor", help="Check that everything is set up.")
+    doctor.add_argument(
+        "--env-file",
+        default=str(APP_ENV_PATH) if APP_ENV_PATH.exists() else ".env",
+        help="Path to env file. Defaults to the background helper's copy once installed.",
+    )
+    doctor.add_argument("--verbose", action="store_true", help="Enable debug logging.")
+    doctor.set_defaults(func=command_doctor, dry_run=False)
 
     daemon = subparsers.add_parser("daemon", parents=[parent], help="Run the polling daemon.")
     daemon.add_argument("--once", action="store_true", help="Run one poll and exit.")
@@ -102,7 +114,7 @@ def command_status(args: argparse.Namespace) -> int:
     print(f"Signal: {zoom_state.signal} ({zoom_state.detail})")
 
     if config.slack_user_token or config.dry_run:
-        slack = SlackClient(config.slack_user_token, dry_run=config.dry_run)
+        slack = _slack_client(config, args)
         status = slack.get_status()
         print(f"Slack: {status.emoji} {status.text}".strip())
         print(f"Slack expiration: {status.expiration}")
@@ -111,14 +123,32 @@ def command_status(args: argparse.Namespace) -> int:
             print(f"Outlook Calendar precedence: {'active' if outlook_owned else 'not active'}")
     else:
         print("Slack: not checked because SLACK_USER_TOKEN is not set")
+
+    if config.lunch_enabled:
+        calendar_check = OutlookCalendarDetector(app_name=config.outlook_app_name, subject_filters=config.lunch_labels).current_event_titles()
+        if not calendar_check.checked:
+            print(f"Lunch detection: could not read Outlook calendar ({calendar_check.detail})")
+        else:
+            titles = ", ".join(calendar_check.event_titles) or "(no current events)"
+            lunch_active = any_lunch_event(calendar_check.event_titles, config)
+            print(f"Lunch detection: {'active' if lunch_active else 'not active'} (current events: {titles})")
     return 0
+
+
+def command_doctor(args: argparse.Namespace) -> int:
+    config = _config(args)
+    slack = _slack_client(config, args) if config.slack_user_token else None
+    checks = run_checks(config, Path(args.env_file), slack=slack)
+    sys.stdout.write(format_checks(checks))
+    return 0 if all(check.ok or not check.required for check in checks) else 1
 
 
 def command_daemon(args: argparse.Namespace) -> int:
     config = _config(args, interval=args.interval)
     validate_config(config)
     detector = ZoomDetector()
-    synchronizer = _synchronizer(config)
+    calendar_detector = OutlookCalendarDetector(app_name=config.outlook_app_name, subject_filters=config.lunch_labels)
+    synchronizer = _synchronizer(config, args)
 
     if args.once:
         zoom_state = detector.detect()
@@ -129,23 +159,24 @@ def command_daemon(args: argparse.Namespace) -> int:
             zoom_state.detail,
         )
         synchronizer.handle_zoom_state(zoom_state.in_meeting)
+        _check_lunch(config, calendar_detector, synchronizer)
         return 0
 
-    run_daemon(config, detector, synchronizer)
+    run_daemon(config, detector, calendar_detector, synchronizer)
     return 0
 
 
 def command_set_busy(args: argparse.Namespace) -> int:
     config = _config(args)
     validate_config(config)
-    _synchronizer(config).force_busy()
+    _synchronizer(config, args).force_busy()
     return 0
 
 
 def command_restore(args: argparse.Namespace) -> int:
     config = _config(args)
     validate_config(config)
-    _synchronizer(config).restore()
+    _synchronizer(config, args).restore()
     return 0
 
 
@@ -194,7 +225,7 @@ def command_oauth_login(args: argparse.Namespace) -> int:
     )
     print(f"Saved Slack user token for user {token.user_id or '(unknown)'} to {args.env_file}.")
     if token.refresh_token:
-        print("Warning: Slack returned a rotating token. Disable token rotation for now, or rerun oauth login when this token expires.")
+        print("Token rotation is on; the background helper will refresh the token automatically.")
     print("Run launch-agent install again to use this token in the background helper.")
     return 0
 
@@ -218,7 +249,12 @@ def command_launch_agent(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_daemon(config: Config, detector: ZoomDetector, synchronizer: StatusSynchronizer) -> None:
+def run_daemon(
+    config: Config,
+    detector: ZoomDetector,
+    calendar_detector: OutlookCalendarDetector,
+    synchronizer: StatusSynchronizer,
+) -> None:
     logging.info("Starting Zoom to Slack watcher. Polling every %s seconds.", config.poll_seconds)
     stable_state: bool | None = None
     busy_count = 0
@@ -255,29 +291,70 @@ def run_daemon(config: Config, detector: ZoomDetector, synchronizer: StatusSynch
                 zoom_state.detail,
             )
 
-        if stable_state is not None:
-            try:
+        try:
+            if stable_state is not None:
                 synchronizer.handle_zoom_state(stable_state)
-            except SlackRateLimitError as exc:
-                sleep_for = exc.retry_after or config.poll_seconds
-                logging.warning("Slack rate limited the request; sleeping for %s seconds.", sleep_for)
-                time.sleep(sleep_for)
-            except SlackApiError as exc:
-                sleep_for = max(60, config.poll_seconds)
-                logging.error("Slack update failed: %s. Sleeping for %s seconds.", exc, sleep_for)
-                time.sleep(sleep_for)
+            _check_lunch(config, calendar_detector, synchronizer)
+        except SlackRateLimitError as exc:
+            sleep_for = exc.retry_after or config.poll_seconds
+            logging.warning("Slack rate limited the request; sleeping for %s seconds.", sleep_for)
+            time.sleep(sleep_for)
+        except SlackApiError as exc:
+            sleep_for = max(60, config.poll_seconds)
+            logging.error("Slack update failed: %s. Sleeping for %s seconds.", exc, sleep_for)
+            time.sleep(sleep_for)
 
         time.sleep(config.poll_seconds)
 
 
+def _check_lunch(
+    config: Config,
+    calendar_detector: OutlookCalendarDetector,
+    synchronizer: StatusSynchronizer,
+) -> None:
+    if not config.lunch_enabled:
+        return
+
+    calendar_check = calendar_detector.current_event_titles()
+    if not calendar_check.checked:
+        logging.debug("Could not read Outlook calendar: %s", calendar_check.detail)
+        return
+
+    lunch_active = any_lunch_event(calendar_check.event_titles, config)
+    synchronizer.handle_lunch_state(lunch_active)
+
+
 def _config(args: argparse.Namespace, *, interval: int | None = None) -> Config:
+    # Token refresh happens inside SlackClient, so only the copy of .env that owns the
+    # refresh token ever spends it. See _slack_client.
     return config_from_env(dry_run=args.dry_run, interval=interval)
 
 
-def _synchronizer(config: Config) -> StatusSynchronizer:
-    slack = SlackClient(config.slack_user_token, dry_run=config.dry_run)
+def _slack_client(config: Config, args: argparse.Namespace) -> SlackClient:
+    refresher = None
+    env_file = Path(args.env_file)
+    can_refresh = config.slack_refresh_token and config.slack_client_id and not config.dry_run
+    if can_refresh and _owns_refresh_token(env_file):
+        refresher = TokenRefresher(
+            env_file=env_file,
+            client_id=config.slack_client_id,
+            refresh_token=config.slack_refresh_token,
+            expires_at=config.slack_token_expires_at,
+        )
+    return SlackClient(config.slack_user_token, dry_run=config.dry_run, token_refresher=refresher)
+
+
+def _owns_refresh_token(env_file: Path) -> bool:
+    # Refresh tokens are single-use. Once the background helper is installed, only its copy
+    # of .env may refresh; otherwise the two copies would invalidate each other's tokens.
+    if not APP_ENV_PATH.exists():
+        return True
+    return env_file.expanduser().resolve() == APP_ENV_PATH.resolve()
+
+
+def _synchronizer(config: Config, args: argparse.Namespace) -> StatusSynchronizer:
     store = StateStore(config.state_file)
-    return StatusSynchronizer(config, slack, store)
+    return StatusSynchronizer(config, _slack_client(config, args), store)
 
 
 if __name__ == "__main__":
