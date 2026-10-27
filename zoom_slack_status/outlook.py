@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Iterable
+
 from .config import Config
 from .slack import SlackStatus
 
@@ -25,3 +27,18 @@ def is_outlook_calendar_status(status: SlackStatus, config: Config) -> bool:
         return True
 
     return outlook_status_label(raw) in config.outlook_status_texts
+
+
+def is_lunch_event_title(title: str, config: Config) -> bool:
+    if not config.lunch_enabled:
+        return False
+
+    raw = (title or "").strip()
+    if not raw:
+        return False
+
+    return outlook_status_label(raw) in config.lunch_labels
+
+
+def any_lunch_event(titles: Iterable[str], config: Config) -> bool:
+    return any(is_lunch_event_title(title, config) for title in titles)

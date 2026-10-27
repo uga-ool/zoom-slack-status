@@ -7,7 +7,8 @@ from typing import Optional
 
 
 DEFAULT_STATE_FILE = "~/Library/Application Support/zoom-slack-status/state.json"
-DEFAULT_OUTLOOK_STATUS_TEXTS = "In a meeting,Working remotely,Out of office"
+DEFAULT_OUTLOOK_STATUS_TEXTS = "In a meeting,Working remotely,Out of office,Lunch"
+DEFAULT_LUNCH_LABELS = "Lunch"
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,15 @@ class Config:
     dry_run: bool
     outlook_precedence: bool
     outlook_status_texts: frozenset[str]
+    lunch_enabled: bool
+    lunch_status_text: str
+    lunch_status_emoji: str
+    lunch_labels: frozenset[str]
+    lunch_ttl_minutes: int
+    outlook_app_name: str
+    slack_client_id: str
+    slack_refresh_token: str
+    slack_token_expires_at: int
 
     @property
     def status_ttl_seconds(self) -> int:
@@ -32,6 +42,10 @@ class Config:
     @property
     def refresh_seconds(self) -> int:
         return max(0, self.refresh_minutes * 60)
+
+    @property
+    def lunch_ttl_seconds(self) -> int:
+        return max(0, self.lunch_ttl_minutes * 60)
 
 
 def load_env_file(path: Optional[str]) -> None:
@@ -76,6 +90,17 @@ def config_from_env(*, dry_run: bool = False, interval: Optional[int] = None) ->
         outlook_status_texts=_parse_outlook_status_texts(
             os.environ.get("ZOOM_SLACK_OUTLOOK_STATUS_TEXTS", DEFAULT_OUTLOOK_STATUS_TEXTS)
         ),
+        lunch_enabled=_env_bool("ZOOM_SLACK_LUNCH_ENABLED", True),
+        lunch_status_text=os.environ.get("ZOOM_SLACK_LUNCH_STATUS_TEXT", "Lunch").strip(),
+        lunch_status_emoji=os.environ.get("ZOOM_SLACK_LUNCH_STATUS_EMOJI", ":fork_and_knife:").strip(),
+        lunch_labels=_parse_outlook_status_texts(
+            os.environ.get("ZOOM_SLACK_LUNCH_LABELS", DEFAULT_LUNCH_LABELS)
+        ),
+        lunch_ttl_minutes=_env_int("ZOOM_SLACK_LUNCH_TTL_MINUTES", 60),
+        outlook_app_name=os.environ.get("ZOOM_SLACK_OUTLOOK_APP_NAME", "Microsoft Outlook").strip(),
+        slack_client_id=os.environ.get("SLACK_CLIENT_ID", "").strip(),
+        slack_refresh_token=os.environ.get("SLACK_REFRESH_TOKEN", "").strip(),
+        slack_token_expires_at=_env_int("SLACK_TOKEN_EXPIRES_AT", 0),
     )
 
 
@@ -88,6 +113,8 @@ def validate_config(config: Config) -> None:
         raise ValueError("ZOOM_SLACK_POLL_SECONDS must be at least 1.")
     if config.refresh_seconds and config.refresh_seconds < 60:
         raise ValueError("ZOOM_SLACK_REFRESH_MINUTES must be 0 or at least 1.")
+    if len(config.lunch_status_text) > 100:
+        raise ValueError("ZOOM_SLACK_LUNCH_STATUS_TEXT must be 100 characters or fewer.")
 
 
 def _env_int(name: str, default: int) -> int:

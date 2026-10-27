@@ -204,9 +204,49 @@ def save_oauth_env(
         "SLACK_TEAM_ID": token.team_id,
         "SLACK_TOKEN_TYPE": token.token_type,
     }
+    if token.refresh_token:
+        values["SLACK_REFRESH_TOKEN"] = token.refresh_token
     if token.expires_in:
         values["SLACK_TOKEN_EXPIRES_AT"] = str(token.expires_at)
 
+    update_env_file(env_file, values)
+
+
+def refresh_access_token(*, client_id: str, refresh_token: str) -> OAuthToken:
+    """Exchanges a rotating refresh token for a new access token.
+
+    See https://api.slack.com/authentication/rotation. The response fields
+    are top-level here (unlike the initial user-token exchange, which nests
+    user fields under "authed_user").
+    """
+    payload = {
+        "client_id": client_id,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token,
+    }
+    response = _oauth_request(payload)
+    access_token = response.get("access_token") or ""
+    if not access_token:
+        raise SlackApiError("Slack refresh response did not include an access token.")
+
+    return OAuthToken(
+        access_token=str(access_token),
+        token_type=str(response.get("token_type") or ""),
+        user_id=str(response.get("user_id") or ""),
+        team_id=str(response.get("team_id") or ""),
+        refresh_token=str(response.get("refresh_token") or refresh_token),
+        expires_in=int(response.get("expires_in") or 0),
+    )
+
+
+def save_refreshed_token(env_file: Path, token: OAuthToken) -> None:
+    values = {"SLACK_USER_TOKEN": token.access_token}
+    if token.token_type:
+        values["SLACK_TOKEN_TYPE"] = token.token_type
+    if token.refresh_token:
+        values["SLACK_REFRESH_TOKEN"] = token.refresh_token
+    if token.expires_in:
+        values["SLACK_TOKEN_EXPIRES_AT"] = str(token.expires_at)
     update_env_file(env_file, values)
 
 
